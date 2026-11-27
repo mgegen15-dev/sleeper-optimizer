@@ -74,12 +74,16 @@ def text(ctx) -> str:
     if ctx.get("do_now"):
         for d in ctx["do_now"]:
             L.append(f"  [LOCK NOW] {d['player']} at {d['x']:.1f}  before {d['before']} tip  (riding {d.get('ride_games', 'his remaining games')} is worth ~{d['next_value']:.1f}, {_pp(d['dpwin'])})")
+            if d.get("proof"):
+                L.append(f"        {d['proof']}")
     else:
         L.append("  Nothing to tap right now.")
     L += ["", "LINEUP MOVES"]
     if ctx.get("move_cards"):
         for m in ctx["move_cards"]:
             L.append(f"  MOVE: {m['text']}" + (f"  ({_pp(m['dpwin'])})" if m.get("dpwin") is not None else ""))
+            if m.get("proof"):
+                L.append(f"        {m['proof']}")
             if m.get("also_text"):
                 L.append(f"        {m['also_text']}")
     else:
@@ -101,6 +105,8 @@ def text(ctx) -> str:
             L.append(f"  {head}")
             for r in grp:
                 L.append(f"    {r['slot']:<5} {r['name']:<24} {pill_tag(r):<14} {r['reason']}")
+                if r.get("proof"):
+                    L.append(f"          {r['proof']}")
     if ctx.get("news"):
         L += ["", "NEWS THAT MOVED THE ODDS"] + [f"  - {n}" for n in ctx["news"]]
     if ctx.get("waivers") is not None or ctx.get("trades") is not None or ctx.get("playoff") is not None:
@@ -181,14 +187,16 @@ def html(ctx) -> str:
     # 2) do this now
     if ctx.get("do_now"):
         inner = "".join(_action_card("LOCK", f"{d['player']} at {d['x']:.1f}",
-                                     f"Before {d['before']} tip · riding {d.get('ride_games', 'his remaining games')} is worth ~{d['next_value']:.1f}", d["dpwin"])
+                                     f"Before {d['before']} tip · riding {d.get('ride_games', 'his remaining games')} is worth ~{d['next_value']:.1f}"
+                                     + (f" — {d['proof']}" if d.get("proof") else ""), d["dpwin"])
                         for d in ctx["do_now"])
     else:
         inner = '<div class="t" style="font-size:14px;color:#374151">Nothing to tap right now.</div>'
     card("Do this now", inner)
     # 3) lineup moves
     if ctx.get("move_cards"):
-        inner = "".join(_action_card("MOVE", m["text"], m.get("also_text", ""), m.get("dpwin")) for m in ctx["move_cards"])
+        inner = "".join(_action_card("MOVE", m["text"], " — ".join(x for x in (m.get("proof"), m.get("also_text")) if x), m.get("dpwin"))
+                        for m in ctx["move_cards"])
     else:
         inner = _action_card("KEEP", "No swaps today. Leave the lineup as it is.",
                              (ctx.get("best_alternative") or {}).get("text", ""))
@@ -212,7 +220,8 @@ def html(ctx) -> str:
                 inner += ('<tr>'
                           f'<td class="m" style="width:44px;font-size:12px;color:#6b7280;padding:7px 0;border-top:1px solid #eef0f3;vertical-align:top">{escape(r["slot"])}</td>'
                           f'<td style="padding:7px 6px;border-top:1px solid #eef0f3"><div class="t" style="font-size:14px;font-weight:600;color:#111827">{escape(r["name"])}</div>'
-                          f'<div class="m" style="font-size:12px;color:#6b7280">{escape(r["reason"])}</div></td>'
+                          f'<div class="m" style="font-size:12px;color:#6b7280">{escape(r["reason"])}</div>'
+                          + (f'<div class="m" style="font-size:11px;color:#9ca3af">{escape(r["proof"])}</div>' if r.get("proof") else "") + '</td>'
                           f'<td align="right" style="padding:7px 0;border-top:1px solid #eef0f3;vertical-align:top">{_pill_html(r)}</td></tr>')
             inner += "</table>"
         card("Where every player stands", inner)

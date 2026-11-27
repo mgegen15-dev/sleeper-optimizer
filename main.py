@@ -106,6 +106,13 @@ def analyse(snap, cfg, mode, timings, state=None):
             teams[r["roster_id"]] = solve_team(snap, r["roster_id"], book, draws)
     opp = teams[opp_rid]
     me = solve_team(snap, rid, book, draws, vs=opp.totals)
+    # self-check: re-test every lock/ride/bench call against all its options on the same paths
+    from optimize import selfcheck as sc
+    try:
+        dec_checks = sc.check_decisions(snap, book, me, opp.totals, draws)
+    except Exception as e:
+        dec_checks = []
+        snap.failures.append(f"Self-check of lock calls failed ({type(e).__name__})")
     teams[rid] = me
     timings["week_engine_s"] = round(time.time() - t, 1)
     pw = p_win(me.totals, opp.totals)
@@ -275,6 +282,24 @@ def analyse(snap, cfg, mode, timings, state=None):
     timings["alternatives_s"] = round(time.time() - t_alt, 1)
     ctx.update(build_view(snap, cfg, mode, me, book, locks, moves, tonight | used, lineup_date, plays_on, ctx))
     attach_alternatives(ctx, considered, snap)
+    swap_checks = sc.check_swaps(considered, opp.totals)
+    timings["selfcheck"] = sc.counts(dec_checks, swap_checks)
+    today_s = snap.now.date().isoformat()
+    proofs = {r["pid"]: sc.proof_line(r, today_s) for r in dec_checks}
+    for row in ctx.get("players") or []:
+        pid = next((p for p, nm in ((p, snap.pname(p)) for p in proofs) if nm == row["name"]), None)
+        if pid and row["group"] == "OPEN":
+            row["proof"] = proofs[pid]
+    for d in ctx.get("do_now") or []:
+        pid = next((p for p in proofs if snap.pname(p) == d["player"]), None)
+        if pid:
+            d["proof"] = proofs[pid]
+    for card in ctx.get("move_cards") or []:
+        hit = next((w for w in swap_checks if f"Move {w['pick']} into" in card["text"]), None)
+        if hit:
+            card["proof"] = (f"pick {hit['pick_pwin'] * 100:.1f}% vs {hit['best']} {hit['best_pwin'] * 100:.1f}% "
+                             f"({hit['diff'] * 100:+.1f} ± {hit['se'] * 100:.1f}{', tie' if hit['tie'] else ''})"
+                             + (f" · self-check: {hit['best']} is better beyond noise, start him instead" if hit["overturned"] else ""))
     return ctx, me
 
 

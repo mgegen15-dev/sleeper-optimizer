@@ -44,7 +44,8 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
         inp2 = dict(inp_x)
         inp2["pinned"] = {**inp_x["pinned"], (pid, day): slot}
         pl = build_plan(book, inp2, ch)
-        return p_win(simulate_plan(pl, draws), opp_totals), pl.ev
+        tot = simulate_plan(pl, draws)
+        return p_win(tot, opp_totals), pl.ev, tot
 
     bench = [p for p in map(str, r["players"]) if p not in reserve and p not in starters and _tonight(snap, p, day)]
     droppable = [p for p in map(str, r["players"]) if p not in reserve and p not in starters]
@@ -67,8 +68,8 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
         cands = []
         for p in bench:
             if eligible(s.slot, inp["positions"].get(p) or snap.players.get(p, {}).get("fantasy_positions")):
-                pw, ev = run(inp, s.index, p, bench_occ)
-                cands.append(dict(pid=p, name=snap.pname(p), source="bench", drop=None, pwin=pw, ev=ev))
+                pw, ev, tot = run(inp, s.index, p, bench_occ)
+                cands.append(dict(pid=p, name=snap.pname(p), source="bench", drop=None, pwin=pw, ev=ev, tot=tot))
         for p in fas:
             if not eligible(s.slot, snap.players.get(p, {}).get("fantasy_positions")):
                 continue
@@ -77,8 +78,8 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
                 continue
             roster = [x for x in map(str, r["players"]) if x != drop] + [p]
             inp_f = team_inputs(snap, rid, roster_override=roster)
-            pw, ev = run(inp_f, s.index, p, bench_occ)
-            cands.append(dict(pid=p, name=snap.pname(p), source="FA", drop=snap.pname(drop), pwin=pw, ev=ev))
+            pw, ev, tot = run(inp_f, s.index, p, bench_occ)
+            cands.append(dict(pid=p, name=snap.pname(p), source="FA", drop=snap.pname(drop), pwin=pw, ev=ev, tot=tot))
         if not cands:
             continue
         for c in cands:                      # E[pts] tonight (our blend) and Sleeper's own projection, for tie-breaks
@@ -89,7 +90,7 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
         cands.sort(key=lambda c: -c["pwin"])
         pick_pid = tonight_assign.get(s.index)
         keep = dict(pid=s.pid, name=snap.pname(s.pid) if s.pid else "—", source="keep", drop=None,
-                    pwin=p_win(me.totals, opp_totals), ev=me.ev)
+                    pwin=p_win(me.totals, opp_totals), ev=me.ev, tot=me.totals)
         moved = pick_pid is not None and pick_pid != s.pid and pick_pid not in starters
         pick = next((c for c in cands if c["pid"] == pick_pid), None) if moved else keep
         if pick is None:
