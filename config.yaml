@@ -1,0 +1,106 @@
+# All tunables for the Sleeper NBA decision engine. Edit here, not in code.
+
+league_id: "1340092651755560960"
+roster_id: 10
+timezone: America/Chicago
+cache_dir: data_raw          # raw API cache (gitignored)
+state_file: state/sent.json  # sent-email state (committed by the workflow)
+
+http:
+  timeout_s: 30
+  retries: 3
+
+model:
+  half_life_games: 7          # recency weight halves every 7 games
+  recent_games: 15            # recency mean uses the last 15 games
+  blend_weights:              # mean = weighted blend (renormalised over what's available)
+    recency: 0.45
+    season: 0.25
+    projection: 0.30
+  small_sample_gp: 8          # below this many games, shrink toward positional prior
+  opp_adjust_cap: 0.05        # opponent adjustment capped at +/-5%
+  opp_adjust_shrink_games: 25 # pseudo-games of "average opponent" added before computing the factor
+  residual_samples: 400       # size of each player's outcome sample
+  fallback_cv: 0.35           # shape used when a player has no history at all (gamma, this CV)
+  # P(play) for THIS WEEK's games by Sleeper injury_status (missing status -> healthy)
+  injury_play_prob:
+    healthy: 0.97
+    Questionable: 0.6
+    GTD: 0.6
+    DTD: 0.6
+    Doubtful: 0.2
+    Out: 0.0
+    Sus: 0.0
+    IR: 0.0
+    NA: 0.0
+  # Average availability over the REST OF SEASON (used for trades / season sim)
+  ros_play_prob:
+    healthy: 0.95
+    Questionable: 0.88
+    GTD: 0.88
+    DTD: 0.88
+    Doubtful: 0.75
+    Out: 0.5
+    Sus: 0.6
+    IR: 0.3
+    NA: 0.3
+
+sims:
+  seed: 20261127
+  n_week: 10000         # Monte Carlo sims of the rest of this week
+  n_screen: 2000        # cheaper sims when screening many candidates
+  n_season: 10000       # season sims for finalists
+  n_season_screen: 3000
+
+schedule:
+  pregame_minutes_before: 60   # send ~60 min before first tip of the day
+  pregame_window_minutes: 15   # send when 0 < minutes-to-first-tip <= before + window (cron every 30 min)
+
+season:
+  playoff_teams: 6
+  division_winners_qualify: true   # assumption: each division winner is guaranteed a spot
+  week_sd_fallback: 30.0           # team weekly score SD if it can't be estimated
+  last_regular_week: 18
+
+waivers:
+  candidates: 25          # top free agents (by blended FP/G) screened
+  finalists: 6            # get full sims
+  min_gp: 3
+  drop_threshold_playoff_pp: 1.0   # recommend add/drop only if playoff odds rise >= 1pp ...
+  drop_threshold_pwin_pp: 3.0      # ... or this week's P(win) rises >= 3pp
+  # FAAB bid = clamp(k * dPlayoff_pp * remaining_budget / weeks_left, min_bid, max_frac * remaining)
+  faab_k: 1.0
+  faab_min_bid: 1
+  faab_max_frac: 0.5
+  protect_starters_today: true     # never drop someone starting tonight
+
+trades:
+  threshold_pp: 2.0       # flag trades that raise my playoff odds >= 2pp
+  max_their_loss_pp: 3.0  # skip trades that hurt the other side more than this (unrealistic)
+  screen_their_loss_pts: 6.0  # screening: max proxy points/week the other side may lose
+  shortlist: 20
+  finalists: 8
+  depth_weight: 0.25      # screening proxy: value of bench depth relative to starters
+  show: 5
+
+private_api:
+  enabled: true     # read lock state from Sleeper's GraphQL if SLEEPER_TOKEN is set (read-only)
+
+locks:
+  file: state/locks.json      # reported locks (email replies, workflow input, or hand edits)
+  imap_host: imap.gmail.com
+  fuzzy_cutoff: 0.8           # difflib similarity needed for a fuzzy name match
+  nicknames:                  # extra aliases -> full name (matched against MY roster only)
+    AD: Anthony Davis
+    Giannis: Giannis Antetokounmpo
+    Greek Freak: Giannis Antetokounmpo
+    Bam: Bam Adebayo
+    PJ: P.J. Washington
+    Kai: Kyrie Irving
+
+email:
+  # recipient: env EMAIL_TO if set, otherwise the sending account (GMAIL_USER) itself
+  user_env: GMAIL_USER
+  password_env: GMAIL_APP_PASSWORD
+  smtp_host: smtp.gmail.com
+  smtp_port: 465
