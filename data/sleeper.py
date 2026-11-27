@@ -74,10 +74,10 @@ class SleeperClient:
     def matchups(self, lid, week, current=True):
         return self.get(f"{APP}/league/{lid}/matchups/{week}", f"matchups/week_{week}.json", 0 if current else 12)
 
-    def matchups_consensus(self, lid, week, tries: int = 3):
-        """Sleeper's matchup endpoint has been seen serving DIFFERENT versions of the same week on
-        consecutive requests (CDN/backend inconsistency). Fetch a few cache-busted copies, keep the most
-        common one, and record a warning when they disagree."""
+    def matchups_consensus(self, lid, week, tries: int = 5):
+        """Sleeper's matchup endpoint serves DIFFERENT versions of the same week on consecutive requests.
+        Fetch `tries` cache-busted copies and use a version only if a strict majority agree. Otherwise
+        fall back to the last version that did have a majority (saved as ..._stable.json) and flag it."""
         import collections
         import random
         seen = []
@@ -85,13 +85,22 @@ class SleeperClient:
             d = self.get(f"{APP}/league/{lid}/matchups/{week}?nc={random.randrange(10**9)}", f"matchups/week_{week}_try{i}.json")
             if d is not None:
                 seen.append(json.dumps(sorted(d, key=lambda m: m["roster_id"]), sort_keys=True))
+        stable = self.cache / f"matchups/week_{week}_stable.json"
         if not seen:
             return self.matchups(lid, week)
         best, cnt = collections.Counter(seen).most_common(1)[0]
-        if cnt < len(seen):
-            self.failures.append(f"matchups week {week}: {len(set(seen))} different versions in {len(seen)} requests "
-                                 f"(Sleeper inconsistency); used the most common ({cnt}/{len(seen)})")
-        data = json.loads(best)
+        if cnt * 2 > len(seen):
+            data = json.loads(best)
+            stable.write_text(json.dumps(data), encoding="utf-8")
+            if cnt < len(seen):
+                self.failures.append(f"matchups week {week}: {len(set(seen))} versions in {len(seen)} requests; used the majority ({cnt}/{len(seen)})")
+        elif stable.exists():
+            data = json.loads(stable.read_text(encoding="utf-8"))
+            self.failures.append(f"matchups week {week}: no majority ({cnt}/{len(seen)} best of {len(set(seen))} versions); "
+                                 f"used the last stable version")
+        else:
+            data = json.loads(best)
+            self.failures.append(f"matchups week {week}: no majority ({cnt}/{len(seen)}) and no stable copy; used the most common - numbers may be off")
         (self.cache / f"matchups/week_{week}.json").write_text(json.dumps(data), encoding="utf-8")
         return data
 

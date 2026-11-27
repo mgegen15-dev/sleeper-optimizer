@@ -100,6 +100,15 @@ def infer_slots(snap, rid: int, week: int | None = None, reported: dict | None =
                 st.conflict = f"{snap.pname(pid)}: you reported a lock but Sleeper shows none; using Sleeper."
         elif reported and pid in reported:
             apply_reported(snap, st, reported[pid], sp)
+        # a counting score is real only if that game was played while he was a STARTER (bench games never count)
+        if st.x is not None and not st.locked and match is not None and W == snap.week:
+            g0 = next((g for g in tg if g.date == match.date), None)
+            started_in = played_as_starter(snap, pid, g0)
+            if started_in is False:
+                st.x, st.open_decision, st.lockable = None, False, False
+                st.note = f"{match.date} game was played on the bench (doesn't count)"
+            elif started_in is None:
+                st.note += " (start history before our first lineup check is assumed)"
         inel = (getattr(snap, "ineligible", None) or {}).get(pid)
         if inel and not st.locked and st.x is not None and match is not None:
             gid = next((str(g.game_id) for g in tg if g.date == match.date), None)
@@ -113,6 +122,28 @@ def infer_slots(snap, rid: int, week: int | None = None, reported: dict | None =
             if pid not in starters:
                 out[0].conflict += f" {snap.pname(pid)} reported locked but is not in a starting slot (ignored)."
     return out
+
+
+def played_as_starter(snap, pid, game):
+    """True / False from our lineup observations around that game's tip; None if we can't tell.
+    - an observation before tip shows him starting and none after shows him benched -> True
+    - the last observation before tip, or any after it, shows him on the bench -> False
+    - no observation before tip: if our FIRST observation (after tip) already has him on the bench -> False,
+      if he is starting in every observation -> None (assumed counted, flagged)"""
+    obs = getattr(snap, "lineup_obs", None) or []
+    if game is None or not obs:
+        return None
+    if game.tip is None:                       # older games have no tip time: use the earliest plausible tip
+        from datetime import datetime, time as dtime
+        tip = datetime.combine(datetime.fromisoformat(game.date).date(), dtime(11, 0), tzinfo=snap.now.tzinfo)
+        game = type("G", (), {"tip": tip})()
+    before = [s for t, s in obs if t <= game.tip]
+    after = [s for t, s in obs if t > game.tip]
+    if before:
+        return pid in before[-1] and all(pid in s for s in after)
+    if after and pid not in after[0]:
+        return False
+    return None if all(pid in s for s in after) else False
 
 
 def apply_api(snap, st: SlotState, game_id, tg, logs, api_points: float):

@@ -46,6 +46,9 @@ def simulate_plan(plan: Plan, draws: Draws) -> np.ndarray:
             done = np.zeros(draws.n, bool)
             for st in sp.seq:
                 x = draws.get(st.pid, st.game)
+                if st.threshold is None and sp.fallback is not None and st is sp.seq[-1]:
+                    fb = draws.get(*sp.fallback)
+                    x = np.where(x > 0, x, fb)        # ruled out before tip -> swap in the fallback, no forfeit
                 take = ~done if st.threshold is None else (~done & (x >= st.threshold))
                 val[take] = x[take]
                 done |= take

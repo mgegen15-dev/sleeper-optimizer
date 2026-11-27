@@ -60,6 +60,8 @@ def manual(snap, cfg, store) -> dict:
 
 def apply(snap, cfg, state, store):
     """Combine observed + manual ineligibility onto the snapshot. Returns notes for Assumptions."""
+    snap.lineup_obs = sorted((datetime.fromisoformat(o["t"]), set(o["starters"]))
+                             for o in state.get("lineup_obs", {}).get(str(snap.week), []))
     obs = from_observations(snap, cfg, state)
     man = manual(snap, cfg, store)
     merged = {}

@@ -43,6 +43,7 @@ class SlotPlan:
     option_pid: str | None = None
     keep: bool = False                # True: keep the option, ignore the sequence
     seq: list = field(default_factory=list)
+    fallback: object = None           # (pid, game): who fills the slot if the last player is ruled OUT before tip
     value: float = 0.0
 
 
@@ -125,4 +126,30 @@ def plan_week(book: ModelBook, slot_names: list, pool: list, games_by_pid: dict,
                     da.pop(s, None)
         ev += sp.value
         out.append(sp)
+    # "wait for news": if the last player in a slot is questionable, his status is known before tip; if he is
+    # ruled out (DNP = 0, nothing forfeited) the slot can take an unused player whose game is later
+    used_after = {}
+    for d, a in day_assign.items():
+        for s_, p_ in a.items():
+            used_after.setdefault(p_, set()).add(d)
+    for sp in out:
+        if not sp.seq or sp.frozen is not None or sp.keep:
+            continue
+        last = sp.seq[-1]
+        m_last, _ = game_model(book, last.pid, last.game)
+        if m_last.p_play >= 0.95:
+            continue
+        best, best_v = None, 0.0
+        for pid in pool:
+            if pid == last.pid or not eligible(slot_names[sp.index], positions.get(pid)):
+                continue
+            for g in games_by_pid.get(pid, []):
+                later = g.date > last.game.date or (g.date == last.game.date and g.tip and last.game.tip and g.tip >= last.game.tip)
+                if not later or (pid in used_after and g.date in used_after[pid]):
+                    continue
+                mm, ff = game_model(book, pid, g)
+                v = mm.expected(ff)
+                if v > best_v:
+                    best, best_v = (pid, g), v
+        sp.fallback = best
     return Plan(out, ev, day_assign)

@@ -127,8 +127,19 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
                 for p in bench_idle if eligible(s.slot, inp["positions"].get(p) or snap.players.get(p, {}).get("fantasy_positions"))]
         keep_opt = []
         occ_state = next((x for x in inp["states"] if x.index == s.index), None)
-        if moved and occ_state is not None and occ_state.pid and occ_state.open_decision:
-            pl_k = build_plan(book, inp, {**choices, s.index: "hold"})
+        if moved:      # the starter actually displaced tonight (slots can be shuffled, e.g. two UTILs)
+            in_tonight = set(tonight_assign.values()) | {x.pid for x in inp["states"] if x.locked}
+            displaced = [x for x in inp["states"] if x.pid and x.pid not in in_tonight and x.index not in frozen
+                         and _tonight(snap, x.pid, day) and eligible(s.slot, inp["positions"].get(x.pid))]
+            if displaced:
+                occ_state = displaced[0]
+        if moved and occ_state is not None and occ_state.pid and (occ_state.open_decision or _tonight(snap, occ_state.pid, day)):
+            if occ_state.open_decision:
+                pl_k = build_plan(book, inp, {**choices, s.index: "hold"})
+            else:                                    # keep him: he plays his game tonight in this slot
+                inp_k = dict(inp)
+                inp_k["pinned"] = {**inp["pinned"], (occ_state.pid, day): s.index}
+                pl_k = build_plan(book, inp_k, choices)
             t_k = simulate_plan(pl_k, draws)
             pk = p_win(t_k, opp_totals)
             g_k = _tonight(snap, occ_state.pid, day)

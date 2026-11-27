@@ -113,6 +113,34 @@ def analyse(snap, cfg, mode, timings, state=None):
     except Exception as e:
         dec_checks = []
         snap.failures.append(f"Self-check of lock calls failed ({type(e).__name__})")
+    # "also considered" + swap self-check BEFORE anything is rendered; an overturned swap becomes the plan
+    t_alt = time.time()
+    from optimize import alternatives as alt
+    considered, swap_checks = [], []
+    try:
+        book_ros_alt = ModelBook(snap.logs, snap.players, snap.proj, cfg, proj_dates=wdates, ros=True)
+        vals = {str(p): tr.player_week_value(book_ros_alt, snap, str(p)) for p in snap.roster(rid)["players"]}
+        considered = alt.evaluate(snap, cfg, book, me, opp.totals, draws, vals)
+        swap_checks = sc.check_swaps(considered, opp.totals)
+        flips = [(c, w) for c, w in zip([c for c in considered if c["runners_up"] and c["pick"].get("tot") is not None], swap_checks)
+                 if w["overturned"]]
+        if flips:
+            from optimize.montecarlo import build_plan, simulate_plan
+            day0 = min(d for d in me.plan.day_assign) if me.plan.day_assign else snap.now.date().isoformat()
+            for c, w in flips:
+                best = max(c["runners_up"], key=lambda r: r["pwin"])
+                if best["source"] == "bench":
+                    me.inputs["pinned"][(best["pid"], day0)] = c["slot_index"]
+            me.plan = build_plan(book, me.inputs, {d.slot_index: d.choice for d in me.decisions})
+            me.totals = simulate_plan(me.plan, draws)
+            considered = alt.evaluate(snap, cfg, book, me, opp.totals, draws, vals)
+            swap_checks = sc.check_swaps(considered, opp.totals)
+            for w in swap_checks:
+                w["applied"] = True
+            snap.lock_notes = list(getattr(snap, "lock_notes", [])) + [f"Self-check replaced {len(flips)} swap(s) with a better option."]
+    except Exception as e:
+        snap.failures.append(f"'Also considered' analysis failed ({type(e).__name__})")
+    timings["alternatives_s"] = round(time.time() - t_alt, 1)
     teams[rid] = me
     timings["week_engine_s"] = round(time.time() - t, 1)
     pw = p_win(me.totals, opp.totals)
@@ -274,20 +302,8 @@ def analyse(snap, cfg, mode, timings, state=None):
                              margin_p90=float(np.percentile(margin, 90))),
                lineup=lineup, moves=moves, locks=locks, locked_list=locked_list, waivers=waivers, trades=trades, assumptions=assumptions,
                playoff=playoff)
-    # "also considered": every bench player and addable free agent for every slot open tonight
-    t_alt = time.time()
-    try:
-        from optimize import alternatives as alt
-        book_ros_alt = ModelBook(snap.logs, snap.players, snap.proj, cfg, proj_dates=wdates, ros=True)
-        vals = {str(p): tr.player_week_value(book_ros_alt, snap, str(p)) for p in snap.roster(rid)["players"]}
-        considered = alt.evaluate(snap, cfg, book, me, opp.totals, draws, vals)
-    except Exception as e:
-        considered = []
-        snap.failures.append(f"'Also considered' analysis failed ({type(e).__name__})")
-    timings["alternatives_s"] = round(time.time() - t_alt, 1)
     ctx.update(build_view(snap, cfg, mode, me, book, locks, moves, tonight | used, lineup_date, plays_on, ctx))
     attach_alternatives(ctx, considered, snap)
-    swap_checks = sc.check_swaps(considered, opp.totals)
     timings["selfcheck"] = sc.counts(dec_checks, swap_checks)
     today_s = snap.now.date().isoformat()
     proofs = {r["pid"]: sc.proof_line(r, today_s) for r in dec_checks}

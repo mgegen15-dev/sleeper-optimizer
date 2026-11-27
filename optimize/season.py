@@ -36,6 +36,13 @@ def history(snap):
                     rec[b["roster_id"]][0] += .5
                 else:
                     rec[(a if a["points"] > b["points"] else b)["roster_id"]][0] += 1
+    # standings come from Sleeper's official roster settings (wins/ties, points-for), NOT from re-adding
+    # completed matchups: the matchup endpoint has served several different versions of past weeks
+    for r in snap.rosters:
+        st = r.get("settings") or {}
+        if "wins" in st:
+            rec[r["roster_id"]] = [float(st.get("wins", 0)) + 0.5 * float(st.get("ties", 0)),
+                                   float(st.get("fpts", 0)) + float(st.get("fpts_decimal", 0)) / 100]
     res = [x - np.mean(v) for v in scores.values() if len(v) >= 2 for x in v]
     n = len(res)
     k = sum(1 for v in scores.values() if len(v) >= 2)
