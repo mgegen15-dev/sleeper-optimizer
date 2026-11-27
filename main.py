@@ -247,7 +247,7 @@ def analyse(snap, cfg, mode, timings, state=None):
     for pid in mine_opp:
         adj = getattr(book, "news", {}).get(pid)
         if adj:
-            assumptions.append(f"News: {snap.pname(pid)} - " + "; ".join(adj.notes))
+            pass          # shown in the "News that moved the odds" section
     assumptions += getattr(snap, "lock_notes", [])
     stale = [s for s in me.states if s.pending]
     if stale:
@@ -262,7 +262,127 @@ def analyse(snap, cfg, mode, timings, state=None):
                              margin_p90=float(np.percentile(margin, 90))),
                lineup=lineup, moves=moves, locks=locks, locked_list=locked_list, waivers=waivers, trades=trades, assumptions=assumptions,
                playoff=playoff)
+    ctx.update(build_view(snap, cfg, mode, me, book, locks, moves, tonight | used, lineup_date, plays_on, ctx))
     return ctx, me
+
+
+def clock(g, today):
+    if not g or not g.tip:
+        return "?"
+    t = g.tip.strftime("%I:%M %p").lstrip("0")
+    return t if g.date == today else f"{g.tip:%a} {t}"
+
+
+def build_view(snap, cfg, mode, me, book, locks, moves, in_lineup, lineup_date, plays_on, ctx):
+    """Structured, data-driven content for the email layout (report/email.py)."""
+    from data.news import game_model
+    rid = cfg["roster_id"]
+    r = snap.roster(rid)
+    today = snap.now.date().isoformat()
+    dec = {d.pid: d for d in me.decisions}
+    callmap = {c["player"]: c for c in locks}
+    frozen_idx = {sp.index for sp in me.plan.slots if sp.frozen is not None}
+    rows, do_now, dont = [], [], []
+    starters = {s.pid for s in me.states if s.pid}
+    reserve = set(r.get("reserve") or [])
+
+    def nxt(pid):
+        team = snap.players.get(pid, {}).get("team")
+        return next((g for g in snap.week_games(team) if not g.started), None) if team else None
+
+    for s in me.states:
+        if not s.pid:
+            continue
+        name = snap.pname(s.pid)
+        d = dec.get(s.pid)
+        g = s.next_game or nxt(s.pid)
+        if s.locked:
+            rows.append(dict(group="LOCKED", slot=s.slot, name=name, pill="LOCKED", pts=s.x,
+                             reason=f"Banked {s.x:.1f}" + (f" ({s.note.split()[1]})" if s.note.startswith("locked ") else "") + "."))
+            continue
+        if d is not None and d.choice == "lock":
+            rows.append(dict(group="OPEN", slot=s.slot, name=name, pill="LOCK NOW", pts=s.x,
+                             reason=f"Lock {s.x:.1f} before {clock(g, today)} tip: beats what his next game is worth (~{d.threshold:.1f})."))
+            do_now.append(dict(player=name, x=s.x, before=clock(g, today), next_value=d.threshold, dpwin=callmap.get(name, {}).get("dpwin", 0)))
+            continue
+        if d is not None and not d.lockable:
+            m, _ = game_model(book, s.pid, g) if g else (None, None)
+            adj = getattr(book, "news", {}).get(s.pid)
+            inj = (adj.status if adj and adj.status else None) or snap.players.get(s.pid, {}).get("injury_status") or "healthy"
+            rows.append(dict(group="OPEN", slot=s.slot, name=name, pill="CAN'T LOCK", pts=s.x,
+                             reason=f"Benched after tip earlier, so no lock. {clock(g, today)} counts ({inj}, {m.p_play * 100:.0f}% to play)." if m else
+                             "Benched after tip earlier, so no lock."))
+            continue
+        if d is not None and d.choice == "ride":
+            rows.append(dict(group="OPEN", slot=s.slot, name=name, pill="BENCH", pts=s.x,
+                             reason=f"Bench him: frees {s.slot} for a player who plays sooner. Forfeits his {s.x:.1f}."))
+            continue
+        if d is not None:
+            rows.append(dict(group="OPEN", slot=s.slot, name=name, pill="RIDE", pts=s.x,
+                             reason=f"Has {s.x:.1f}, needs {d.threshold:.1f} to lock. {clock(g, today)} is his better shot."))
+            continue
+        rows.append(dict(group="OPEN", slot=s.slot, name=name, pill="RIDE", pts=s.x,
+                         reason=(f"Next game {clock(g, today)}." if g else "No games left; his score stands if he stays in.")))
+    for pid in map(str, r["players"]):
+        if pid in starters:
+            continue
+        name = snap.pname(pid)
+        if pid in reserve:
+            inj = snap.players.get(pid, {}).get("injury_status") or "IR"
+            rows.append(dict(group="IR", slot="IR", name=name, pill="BENCH", pts=None, reason=f"{inj}."))
+            continue
+        g = nxt(pid)
+        starts = pid in in_lineup
+        rows.append(dict(group="BENCH", slot="BN", name=name, pill="BENCH", pts=None,
+                         reason=("Moves into the lineup tonight." if starts else (f"Next game {clock(g, today)}." if g else "No games left this week."))))
+    # DON'T cards: tempting swaps that would bench an unlocked starter whose score still counts
+    bench_tonight = [p for p in map(str, r["players"]) if p not in starters and p not in reserve and p not in in_lineup
+                     and plays_on(p, lineup_date)]
+    from optimize.lock import eligible
+    for s in me.states:
+        d = dec.get(s.pid)
+        if not s.pid or s.locked or s.x is None or s.index in frozen_idx or d is None or d.choice == "ride":
+            continue
+        cands = [p for p in bench_tonight if eligible(s.slot, snap.players.get(p, {}).get("fantasy_positions"))]
+        if not cands:
+            continue
+        best = max(cands, key=lambda p: book.get(p).mu)
+        last = snap.players.get(s.pid, {}).get("last_name", snap.pname(s.pid))
+        what = "lock option" if s.lockable else "score"
+        dont.append(f"Swap {snap.pname(best)} in for {snap.pname(s.pid)} ({s.slot}): benching {last} throws away his {s.x:.1f} {what} for good.")
+    rid_opp = snap.opponent_rid(rid)
+    news = []
+    for pid in [str(p) for p in r["players"]] + [str(p) for p in snap.roster(rid_opp)["players"]]:
+        adj = getattr(book, "news", {}).get(pid)
+        if adj:
+            news.append(f"{snap.pname(pid)}{' (opp)' if pid not in map(str, r['players']) else ''}: " + "; ".join(adj.notes))
+    # pair "start X at SLOT" with "bench Y" into one card: "Move X into SLOT, Y to bench"
+    import re as _re
+    starts = [m for m in moves if m.startswith("start ")]
+    benches = [m for m in moves if m.startswith("bench ")]
+    others = [m for m in moves if m not in starts and m not in benches]
+    move_cards = []
+
+    def pp_for(name):
+        for d in me.decisions:
+            if d.choice == "ride" and snap.pname(d.pid) == name:
+                return callmap.get(name, {}).get("dpwin")
+        return None
+    for st_m in starts:
+        mm = _re.match(r"start (.+) at (\S+)", st_m)
+        x, slot = mm.group(1), mm.group(2)
+        if benches:
+            bm = benches.pop(0)
+            y = _re.match(r"bench (.+?)(:| tonight|$)", bm).group(1)
+            cost = bm.split("forfeits his ")[1] if "forfeits his " in bm else None
+            move_cards.append(dict(text=f"Move {x} into {slot}, {y} to bench" + (f" (forfeits his {cost})" if cost else ""), dpwin=pp_for(y)))
+        else:
+            move_cards.append(dict(text=f"Move {x} into {slot}", dpwin=None))
+    for m in benches + others:
+        move_cards.append(dict(text=m[0].upper() + m[1:], dpwin=None))
+    return dict(mode=mode, players=rows, do_now=do_now, move_cards=move_cards, dont=dont[:3], news=news,
+                lock_source=("Sleeper" if snap.api_locks is not None else "inferred"), read_at=snap.now.strftime("%I:%M %p").lstrip("0"),
+                n_sims=cfg["sims"]["n_week"])
 
 
 # ---------------------------------------------------------------------------------------- auto mode

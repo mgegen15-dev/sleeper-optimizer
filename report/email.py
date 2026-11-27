@@ -1,10 +1,27 @@
-"""Build the alert email: plain text + mobile-friendly HTML (single column, inline styles)."""
+"""Alert email: email-safe HTML (tables + inline CSS, 560px, dark-mode block) and a plain-text mirror.
+Data-driven: every section is skipped when it has nothing to show."""
 from __future__ import annotations
 
 from html import escape
 
-
 FOOTER = "Reply 'locked name, name' to record locks."
+
+PILL = {  # tag -> (background, text colour, label prefix)
+    "LOCKED": ("#dcfce7", "#166534", "\U0001F512 "),
+    "LOCK NOW": ("#16a34a", "#ffffff", ""),
+    "RIDE": ("#f59e0b", "#ffffff", ""),
+    "CAN'T LOCK": ("#e5e7eb", "#374151", ""),
+    "BENCH": ("#f3f4f6", "#4b5563", ""),
+}
+GROUPS = [("LOCKED", "Locked"), ("OPEN", "Still open"), ("BENCH", "Bench"), ("IR", "IR")]
+
+
+def _pp(x):
+    return "—" if x is None else f"{x * 100:+.1f}pp"
+
+
+def _pts(x):
+    return "—" if x is None else f"{x:.1f}"
 
 
 def split_waivers(ws):
@@ -20,106 +37,201 @@ def watch_line(w):
     return f"{w['add']} ({w['dpwin'] * 100:+.1f}pp win, {w['dplayoff'] * 100:+.1f}pp playoffs; not worth a roster spot yet)"
 
 
+def pill_tag(row):
+    """Plain-text tag for a player row."""
+    if row["pill"] == "LOCKED":
+        return f"[LOCKED {_pts(row['pts'])}]"
+    return f"[{row['pill']}]"
+
+
+def top_action(ctx):
+    for d in ctx.get("do_now") or []:
+        last = d["player"].split()[-1]
+        return f"Lock {last} by {d['before'].replace(' PM', '').replace(' AM', '')}"
+    for m in ctx.get("move_cards") or []:
+        return m["text"].split(":")[0].split(" (")[0].split(";")[0][:40]
+    rec, _ = split_waivers(ctx.get("waivers"))
+    if rec:
+        return f"Add {rec[0]['add']}"
+    return "no action"
+
+
 def subject(ctx) -> str:
-    return f"Sleeper | {ctx['date']} | P(win) {ctx['pwin'] * 100:.0f}% | {ctx['n_actions']} actions"
+    return f"Sleeper | {ctx['date']} | {ctx['pwin'] * 100:.0f}% to win | {top_action(ctx)}"
 
 
-def _pp(x):
-    return "—" if x is None else f"{x * 100:+.1f}pp"
+def _mode_label(ctx):
+    return {"pregame": "Pregame", "postgame": "Post-game"}.get(ctx.get("mode"), "Update")
 
 
+# ------------------------------------------------------------------------------------------- text
 def text(ctx) -> str:
-    L = []
     s = ctx["snapshot"]
-    L += ["MATCHUP SNAPSHOT",
-          f"Week {s['week']}: {s['me']} {s['my_score']:.1f}  vs  {s['opp']} ({s['opp_owner']}) {s['opp_score']:.1f}",
-          f"P(win) {ctx['pwin'] * 100:.1f}%  |  projected final {s['my_ev']:.1f} - {s['opp_ev']:.1f}  "
-          f"(margin {s['margin']:+.1f}, 80% range {s['margin_p10']:+.0f} to {s['margin_p90']:+.0f})", ""]
-    L += [f"TONIGHT'S LINEUP ({ctx['lineup_date']})"]
-    for r in ctx["lineup"]:
-        L.append(f"  {r['slot']:<5} {r['player']:<24} {r['game']:<10} {r['tip']:<9} {r['lock']}" + (f"  [{r['note']}]" if r['note'] else ""))
-    if ctx.get("moves"):
-        L += ["  Moves: " + "; ".join(ctx["moves"])]
-    L += ["  Locked (reported/inferred): " + ("; ".join(ctx.get("locked_list") or []) or "none")]
-    L += [""]
-    L += ["LOCK/RIDE CALLS"]
-    if ctx["locks"]:
-        for d in ctx["locks"]:
-            thr = f"vs threshold {d['threshold']:.1f}" if d.get("threshold") is not None else "(not lockable)"
-            pws = " / ".join(f"{k} {v * 100:.1f}%" for k, v in (("lock", d.get("pw_lock")), ("ride", d.get("pw_hold")), ("bench", d.get("pw_bench"))) if v is not None)
-            L.append(f"  {d['decision']:<5} {d['player']:<24} {d['slot']:<5} score {d['x']:.1f} {thr}"
-                     f"  P(win) {pws} ({_pp(d['dpwin'])})  decide before {d['deadline']}" + (f"  [{d['note']}]" if d.get("note") else ""))
+    L = [f"WEEK {s['week']} · {ctx['date']} · {_mode_label(ctx).upper()}   vs {s['opp']}",
+         f"{ctx['pwin'] * 100:.0f}% chance you win this week",
+         f"Live {s['my_score']:.1f} - {s['opp_score']:.1f}   Projected final {s['my_ev']:.1f} – {s['opp_ev']:.1f} ({s['margin']:+.1f})", ""]
+    L += ["DO THIS NOW"]
+    if ctx.get("do_now"):
+        for d in ctx["do_now"]:
+            L.append(f"  [LOCK NOW] {d['player']} at {d['x']:.1f}  before {d['before']} tip  (next game ~{d['next_value']:.1f}, {_pp(d['dpwin'])})")
     else:
-        L.append("  None open.")
-    L += [""]
-    if ctx.get("waivers") is not None:
-        L += ["WAIVER ADDS"]
-        rec, watch = split_waivers(ctx["waivers"])
+        L.append("  Nothing to tap right now.")
+    L += ["", "LINEUP MOVES"]
+    if ctx.get("move_cards"):
+        for m in ctx["move_cards"]:
+            L.append(f"  MOVE: {m['text']}" + (f"  ({_pp(m['dpwin'])})" if m.get("dpwin") is not None else ""))
+    else:
+        L.append("  KEEP: No swaps today. Leave the lineup as it is.")
+    for d in ctx.get("dont") or []:
+        L.append(f"  DON'T: {d}")
+    rows = ctx.get("players") or []
+    if rows:
+        L += ["", "WHERE EVERY PLAYER STANDS"]
+        for g, title in GROUPS:
+            grp = [r for r in rows if r["group"] == g]
+            if not grp:
+                continue
+            head = title.upper()
+            if g == "LOCKED":
+                head += f" ({len(grp)} players · {sum(r['pts'] or 0 for r in grp):.1f} banked)"
+            L.append(f"  {head}")
+            for r in grp:
+                L.append(f"    {r['slot']:<5} {r['name']:<24} {pill_tag(r):<14} {r['reason']}")
+    if ctx.get("news"):
+        L += ["", "NEWS THAT MOVED THE ODDS"] + [f"  - {n}" for n in ctx["news"]]
+    if ctx.get("waivers") is not None or ctx.get("trades") is not None or ctx.get("playoff") is not None:
+        L += ["", "WAIVERS & TRADES"]
+        rec, watch = split_waivers(ctx.get("waivers"))
         for w in rec:
             L.append(f"  +{w['add']} / -{w['drop']}  bid ${w['bid']}{' (waivers)' if w['waivers'] else ' (instant FA)'}  "
                      f"P(win) {_pp(w['dpwin'])}  playoffs {_pp(w['dplayoff'])}")
-        if not rec:
+        if ctx.get("waivers") is not None and not rec:
             L.append("  No moves. Best available adds are below the bar.")
         for w in watch:
             L.append(f"  Watch: {watch_line(w)}")
-        L += [""]
-    if ctx.get("trades") is not None:
-        L += ["TRADE IDEAS"]
-        if ctx["trades"]:
-            for t in ctx["trades"]:
-                L.append(f"  {'*' if t['flag'] else ' '} with {t['team']}: give {t['give']} | get {t['get']}  "
-                         f"my playoffs {_pp(t['dme'])}, theirs {_pp(t['dthem'])}")
-        else:
-            L.append("  Nothing clears the bar.")
-        L += [""]
-    L += ["ASSUMPTIONS"] + [f"  - {a}" for a in ctx["assumptions"]]
+        for t in ctx.get("trades") or []:
+            L.append(f"  Trade{' *' if t['flag'] else ''} with {t['team']}: give {t['give']} | get {t['get']}  "
+                     f"my playoffs {_pp(t['dme'])}, theirs {_pp(t['dthem'])}")
+        if ctx.get("playoff") is not None:
+            L.append(f"  Playoff odds: {ctx['playoff'] * 100:.1f}%")
+    if ctx.get("assumptions"):
+        L += ["", "ASSUMPTIONS & DATA"] + [f"  - {a}" for a in ctx["assumptions"]]
+    L += ["", f"{FOOTER}  Locks read from {ctx.get('lock_source', 'inferred')} at {ctx.get('read_at', '?')} · {ctx.get('n_sims', 0):,} sims."]
     return "\n".join(L)
+
+
+# ------------------------------------------------------------------------------------------- html
+CARD = 'style="background:#ffffff;border:1px solid #e3e6ec;border-radius:12px;padding:14px 16px"'
+H2 = 'style="font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#6b7280;margin:0 0 8px;font-weight:700"'
+
+
+def _pill_html(row):
+    bg, fg, pre = PILL.get(row["pill"], PILL["BENCH"])
+    label = f"{pre}{_pts(row['pts'])}" if row["pill"] == "LOCKED" else (
+        f"{row['pill']} {_pts(row['pts'])}" if row["pts"] is not None else row["pill"])
+    return (f'<span style="display:inline-block;background:{bg};color:{fg};border-radius:999px;padding:3px 9px;'
+            f'font-size:12px;font-weight:700;white-space:nowrap">{escape(label)}</span>')
+
+
+def _action_card(kind, title, sub, pp=None):
+    colours = {"LOCK": ("#f0fdf4", "#16a34a"), "MOVE": ("#eff6ff", "#2563eb"), "KEEP": ("#f9fafb", "#6b7280"),
+               "DON'T": ("#fef2f2", "#dc2626")}
+    bg, bd = colours[kind]
+    right = f'<td align="right" style="font-weight:700;color:{bd};font-size:14px;white-space:nowrap;padding-right:12px">{escape(_pp(pp))}</td>' if pp is not None else ""
+    return (f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:{bg};border-left:4px solid {bd};'
+            f'border-radius:8px;margin:0 0 8px"><tr><td style="padding:10px 12px">'
+            f'<div style="font-size:11px;font-weight:800;color:{bd};letter-spacing:.06em">{escape(kind)}</div>'
+            f'<div style="font-size:15px;font-weight:600;color:#111827;margin-top:2px">{escape(title)}</div>'
+            + (f'<div style="font-size:13px;color:#4b5563;margin-top:2px">{escape(sub)}</div>' if sub else "") +
+            f'</td>{right}</tr></table>')
 
 
 def html(ctx) -> str:
     s = ctx["snapshot"]
-    td = 'style="padding:4px 6px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top"'
-    th = 'style="padding:4px 6px;text-align:left;font-size:12px;color:#666;border-bottom:1px solid #ccc"'
+    pw = max(0.0, min(1.0, ctx["pwin"]))
+    out = ['<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+           '<meta name="color-scheme" content="light dark"><style>'
+           '@media (max-width:480px){.wrap{padding:8px!important}.card{padding:12px!important}.big{font-size:40px!important}}'
+           '@media (prefers-color-scheme:dark){body,.bg{background:#0f1115!important}.card{background:#171a21!important;border-color:#2a2f3a!important}'
+           '.t{color:#e5e7eb!important}.m{color:#9ca3af!important}}'
+           '</style></head><body style="margin:0;background:#f2f3f6" class="bg">'
+           '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" class="bg" style="background:#f2f3f6"><tr><td align="center" class="wrap" style="padding:16px">'
+           '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif">']
+    # 1) header
+    out.append(
+        '<tr><td style="background:#166534;background-image:linear-gradient(135deg,#166534,#0f3d24);border-radius:14px;padding:18px 18px 16px;color:#ffffff">'
+        '<table role="presentation" width="100%"><tr>'
+        f'<td style="font-size:12px;opacity:.85;color:#ffffff">Week {s["week"]} · {escape(ctx["date"])} · {_mode_label(ctx)}</td>'
+        f'<td align="right" style="font-size:12px;opacity:.85;color:#ffffff">vs {escape(s["opp"])}</td></tr></table>'
+        f'<div class="big" style="font-size:48px;font-weight:800;line-height:1.05;margin-top:8px">{pw * 100:.0f}%</div>'
+        '<div style="font-size:13px;opacity:.9">chance you win this week</div>'
+        f'<div style="font-size:14px;margin-top:10px">Live {s["my_score"]:.1f} – {s["opp_score"]:.1f} · Projected final {s["my_ev"]:.1f} – {s["opp_ev"]:.1f} ({s["margin"]:+.1f})</div>'
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px;border-radius:6px;overflow:hidden"><tr>'
+        f'<td width="{max(1, round(pw * 100))}%" style="background:#4ade80;height:8px;font-size:0;line-height:0">&nbsp;</td>'
+        f'<td style="background:#14532d;height:8px;font-size:0;line-height:0">&nbsp;</td></tr></table>'
+        '</td></tr>')
 
-    def table(head, rows):
-        h = "".join(f"<th {th}>{escape(x)}</th>" for x in head)
-        b = "".join("<tr>" + "".join(f"<td {td}>{escape(str(c))}</td>" for c in r) + "</tr>" for r in rows)
-        return f'<table style="border-collapse:collapse;width:100%">{"<tr>" + h + "</tr>"}{b}</table>'
+    def card(title, inner):
+        out.append(f'<tr><td style="height:12px"></td></tr><tr><td class="card" {CARD}><div {H2} class="m">{escape(title)}</div>{inner}</td></tr>')
 
-    def sec(t):
-        return f'<h3 style="margin:18px 0 6px;font-size:15px;color:#222">{escape(t)}</h3>'
-
-    parts = [f'<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:640px;margin:auto;color:#222">',
-             sec("Matchup snapshot"),
-             f'<div style="font-size:22px;font-weight:600">P(win) {ctx["pwin"] * 100:.1f}%</div>',
-             f'<div style="font-size:14px">{escape(s["me"])} <b>{s["my_score"]:.1f}</b> vs {escape(s["opp"])} <b>{s["opp_score"]:.1f}</b><br>'
-             f'Projected final {s["my_ev"]:.1f} – {s["opp_ev"]:.1f} (margin {s["margin"]:+.1f}; 80% range {s["margin_p10"]:+.0f} to {s["margin_p90"]:+.0f})</div>',
-             sec(f"Tonight's lineup ({ctx['lineup_date']})"),
-             table(["Slot", "Player", "Game", "Tip CT", "Lock if ≥"], [[r["slot"], r["player"] + (f" ({r['note']})" if r["note"] else ""), r["game"], r["tip"], r["lock"]] for r in ctx["lineup"]])]
-    if ctx.get("moves"):
-        parts.append(f'<p style="font-size:13px"><b>Moves:</b> {escape("; ".join(ctx["moves"]))}</p>')
-    parts.append(f'<p style="font-size:13px"><b>Locked (reported/inferred):</b> {escape("; ".join(ctx.get("locked_list") or []) or "none")}</p>')
-    parts.append(sec("Lock / ride calls"))
-    if ctx["locks"]:
-        parts.append(table(["Call", "Player", "Score", "Threshold", "ΔP(win)", "Before"],
-                           [[d["decision"], d["player"] + (f" ({d['note']})" if d.get("note") else ""), f"{d['x']:.1f}",
-                             f"{d['threshold']:.1f}" if d.get("threshold") is not None else "not lockable", _pp(d["dpwin"]), d["deadline"]] for d in ctx["locks"]]))
+    # 2) do this now
+    if ctx.get("do_now"):
+        inner = "".join(_action_card("LOCK", f"{d['player']} at {d['x']:.1f}",
+                                     f"Before {d['before']} tip · his next game is worth ~{d['next_value']:.1f}", d["dpwin"])
+                        for d in ctx["do_now"])
     else:
-        parts.append('<p style="font-size:13px">None open.</p>')
-    if ctx.get("waivers") is not None:
-        parts.append(sec("Waiver adds"))
-        rec, watch = split_waivers(ctx["waivers"])
-        parts.append(table(["Add", "Drop", "Bid", "ΔP(win)", "ΔPlayoffs"],
-                           [[w["add"], w["drop"], f"${w['bid']}" + (" W" if w["waivers"] else " FA"), _pp(w["dpwin"]), _pp(w["dplayoff"])]
-                            for w in rec]) if rec else '<p style="font-size:13px">No moves. Best available adds are below the bar.</p>')
-        for w in watch:
-            parts.append(f'<p style="font-size:12px;color:#888;margin:4px 0">Watch: {escape(watch_line(w))}</p>')
-    if ctx.get("trades") is not None:
-        parts.append(sec("Trade ideas"))
-        parts.append(table(["Team", "Give", "Get", "Mine", "Theirs"],
-                           [[("★ " if t["flag"] else "") + t["team"], t["give"], t["get"], _pp(t["dme"]), _pp(t["dthem"])] for t in ctx["trades"]])
-                     if ctx["trades"] else '<p style="font-size:13px">Nothing clears the bar.</p>')
-    parts.append(sec("Assumptions"))
-    parts.append('<ul style="font-size:12px;color:#555;padding-left:18px">' + "".join(f"<li>{escape(a)}</li>" for a in ctx["assumptions"]) + "</ul>"
-                 f'<p style="font-size:13px;color:#333;border-top:1px solid #ddd;padding-top:8px">{escape(FOOTER)}</p></div>')
-    return "".join(parts)
+        inner = '<div class="t" style="font-size:14px;color:#374151">Nothing to tap right now.</div>'
+    card("Do this now", inner)
+    # 3) lineup moves
+    if ctx.get("move_cards"):
+        inner = "".join(_action_card("MOVE", m["text"], "", m.get("dpwin")) for m in ctx["move_cards"])
+    else:
+        inner = _action_card("KEEP", "No swaps today. Leave the lineup as it is.", "")
+    inner += "".join(_action_card("DON'T", d, "") for d in ctx.get("dont") or [])
+    card("Lineup moves", inner)
+    # 4) where every player stands
+    rows = ctx.get("players") or []
+    if rows:
+        legend = " ".join(_pill_html(dict(pill=k, pts=(43.0 if k == "LOCKED" else None))) for k in PILL)
+        inner = f'<div style="margin:0 0 10px;line-height:2">{legend}</div>'
+        for g, title in GROUPS:
+            grp = [r for r in rows if r["group"] == g]
+            if not grp:
+                continue
+            head = escape(title)
+            if g == "LOCKED":
+                head += f' <span style="font-weight:400;color:#6b7280">({len(grp)} players · {sum(r["pts"] or 0 for r in grp):.1f} banked)</span>'
+            inner += f'<div class="t" style="font-size:13px;font-weight:700;color:#111827;margin:10px 0 4px">{head}</div>'
+            inner += '<table role="presentation" width="100%" cellspacing="0" cellpadding="0">'
+            for r in grp:
+                inner += ('<tr>'
+                          f'<td class="m" style="width:44px;font-size:12px;color:#6b7280;padding:7px 0;border-top:1px solid #eef0f3;vertical-align:top">{escape(r["slot"])}</td>'
+                          f'<td style="padding:7px 6px;border-top:1px solid #eef0f3"><div class="t" style="font-size:14px;font-weight:600;color:#111827">{escape(r["name"])}</div>'
+                          f'<div class="m" style="font-size:12px;color:#6b7280">{escape(r["reason"])}</div></td>'
+                          f'<td align="right" style="padding:7px 0;border-top:1px solid #eef0f3;vertical-align:top">{_pill_html(r)}</td></tr>')
+            inner += "</table>"
+        card("Where every player stands", inner)
+    # 5) news, waivers & trades
+    if ctx.get("news"):
+        card("News that moved the odds", "".join(f'<div class="t" style="font-size:13px;color:#374151;margin:0 0 6px">{escape(n)}</div>' for n in ctx["news"]))
+    if ctx.get("waivers") is not None or ctx.get("trades") is not None or ctx.get("playoff") is not None:
+        rec, watch = split_waivers(ctx.get("waivers"))
+        inner = "".join(_action_card("MOVE", f"Add {w['add']}, drop {w['drop']}",
+                                     f"Bid ${w['bid']}{' (waivers)' if w['waivers'] else ' (instant free agent)'} · playoffs {_pp(w['dplayoff'])}", w["dpwin"]) for w in rec)
+        if ctx.get("waivers") is not None and not rec:
+            inner += '<div class="t" style="font-size:14px;color:#374151">No moves. Best available adds are below the bar.</div>'
+        inner += "".join(f'<div class="m" style="font-size:12px;color:#9ca3af;margin-top:4px">Watch: {escape(watch_line(w))}</div>' for w in watch)
+        for t in ctx.get("trades") or []:
+            inner += (f'<div class="t" style="font-size:13px;color:#374151;margin-top:8px">{"★ " if t["flag"] else ""}Trade with {escape(t["team"])}: '
+                      f'give {escape(t["give"])}, get {escape(t["get"])} · mine {_pp(t["dme"])}, theirs {_pp(t["dthem"])}</div>')
+        if ctx.get("playoff") is not None:
+            inner += f'<div class="m" style="font-size:12px;color:#6b7280;margin-top:8px">Playoff odds: {ctx["playoff"] * 100:.1f}%</div>'
+        card("Waivers & trades", inner)
+    if ctx.get("assumptions"):
+        card("Assumptions & data", '<ul style="margin:0;padding-left:18px">' + "".join(
+            f'<li class="m" style="font-size:11px;color:#6b7280;margin:0 0 3px">{escape(a)}</li>' for a in ctx["assumptions"]) + "</ul>")
+    # 6) footer
+    out.append(f'<tr><td class="m" style="font-size:12px;color:#6b7280;text-align:center;padding:14px 8px 18px">{escape(FOOTER)}<br>'
+               f'Locks read from {escape(ctx.get("lock_source", "inferred"))} at {escape(ctx.get("read_at", "?"))} · {ctx.get("n_sims", 0):,} sims</td></tr>')
+    out.append("</table></td></tr></table></body></html>")
+    return "".join(out)
