@@ -148,6 +148,8 @@ class ModelBook:
         if prior is not None and a < 1:
             hist = a * (hist or 0.0) + (1 - a) * prior
         wh = w["recency"] + w["season"]
+        parts["hist"] = hist                      # history part, re-blended per game with that game's projection
+        parts["w_hist"], parts["w_proj"] = wh, w["projection"]
         if hist is not None and proj_mean is not None:
             mu = (wh * hist + w["projection"] * proj_mean) / (wh + w["projection"])
         else:

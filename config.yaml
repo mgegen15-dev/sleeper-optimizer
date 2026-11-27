@@ -47,7 +47,7 @@ model:
 
 sims:
   seed: 20261127
-  n_week: 10000         # Monte Carlo sims of the rest of this week
+  n_week: 50000         # Monte Carlo sims of the rest of this week (paired: SE ~0.15pp)
   n_screen: 2000        # cheaper sims when screening many candidates
   n_season: 10000       # season sims for finalists
   n_season_screen: 3000

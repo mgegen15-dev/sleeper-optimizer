@@ -58,3 +58,12 @@ def test_proof_line_format():
              runner="hold", pwin=0.596, runner_pwin=0.545, diff=0.051, se=0.001, tie=False, sleeper="agrees", overturned=False)
     assert sc.proof_line(r, "2026-11-27") == ("Games left: 6:30 (97%), Sun 5:00 (97%) · bar 31.2 vs 33.0 · "
                                                "lock 59.6% vs ride 54.5% (+5.1 ± 0.1) · Sleeper agrees")
+
+
+def test_projection_crosscheck_flags_big_gaps():
+    snap, book, dr, opp, me = solved()
+    assert sc.proj_crosscheck(snap, book, ["1380"]) == []                 # no Sleeper projection -> nothing to compare
+    snap.proj["1380"] = {"2026-11-27": 200.0}                             # absurd projection -> flagged
+    book._news_cache = {}
+    f = sc.proj_crosscheck(snap, book, ["1380"])
+    assert f and f[0]["date"] == "2026-11-27" and f[0]["sleeper"] == 200.0

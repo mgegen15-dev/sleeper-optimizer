@@ -142,3 +142,20 @@ def counts(dec_results, swap_results):
     over = sum(r["overturned"] for r in dec_results) + sum(r["overturned"] for r in swap_results)
     ties = sum(r["tie"] for r in dec_results) + sum(r["tie"] for r in swap_results)
     return f"{n - over}/{n} pass, {over} overturned, {ties} ties"
+
+
+def proj_crosscheck(snap, book, pids, gap=0.15):
+    """Per remaining game: our mean-if-he-plays vs Sleeper's own projection; flag gaps > 15%."""
+    from data.news import game_model
+    out = []
+    for pid in pids:
+        team = snap.players.get(pid, {}).get("team")
+        for g in [g for g in snap.week_games(team) if not g.started] if team else []:
+            m, f = game_model(book, pid, g)
+            if m.p_play <= 0:
+                continue
+            ours = m.mu * f * float(m.R.mean())
+            sp = (snap.proj.get(pid) or {}).get(g.date)
+            if sp and abs(ours - sp) / sp > gap:
+                out.append(dict(pid=pid, date=g.date, ours=ours, sleeper=sp, season=m.parts.get("season"), gp=m.parts.get("gp")))
+    return out

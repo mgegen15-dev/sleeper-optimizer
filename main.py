@@ -250,6 +250,11 @@ def analyse(snap, cfg, mode, timings, state=None):
         + ("; STALE fallback: " + ", ".join(k for k, v in snap.freshness.items() if v == 'stale-cache') if 'stale-cache' in snap.freshness.values() else "") + ".",
     ]
     assumptions += [s.conflict.strip() for s in me.states if s.conflict]
+    from optimize.selfcheck import proj_crosscheck
+    flags = proj_crosscheck(snap, book, [str(p) for p in snap.roster(rid)["players"] + snap.roster(opp_rid)["players"]])
+    if flags:
+        assumptions.append("Projection cross-check (ours vs Sleeper, >15% apart; ours follows actual season scoring): " + "; ".join(
+            f"{snap.pname(f['pid'])} {f['date'][5:]} {f['ours']:.1f} vs {f['sleeper']:.1f} (season avg {f['season']}, {f['gp']} GP)" for f in flags))
     mine_opp = [str(p) for p in snap.roster(rid)["players"] + snap.roster(opp_rid)["players"]]
     for pid in mine_opp:
         adj = getattr(book, "news", {}).get(pid)

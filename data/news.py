@@ -193,17 +193,23 @@ def apply(snap, cfg, client, book) -> list[str]:
 
 
 def game_model(book, pid, game):
-    """(PlayerModel adjusted for news on that game's date, opponent factor)."""
+    """(PlayerModel for that specific game, opponent factor).
+    Mean = history blend re-weighted with THAT game's Sleeper projection (not the week's average),
+    then news adjustments (P(play), minutes multiplier) for that date."""
     m = book.get(pid)
     fac = book.opp_factor(pid, game.opp)
+    mu = m.mu
+    parts = getattr(m, "parts", {}) or {}
+    pj = None if getattr(book, "ros", False) else ((getattr(book, "proj", {}) or {}).get(pid) or {}).get(game.date)
+    if pj is not None and "w_proj" in parts:
+        h = parts.get("hist")
+        mu = pj if h is None else (parts["w_hist"] * h + parts["w_proj"] * pj) / (parts["w_hist"] + parts["w_proj"])
     adj = getattr(book, "news", {}).get(pid)
-    if adj is None:
-        return m, fac
-    p, mult = adj.params(game.date, m.p_play)
-    if p == m.p_play and mult == 1.0:
+    p, mult = (adj.params(game.date, m.p_play) if adj is not None else (m.p_play, 1.0))
+    if p == m.p_play and mult == 1.0 and abs(mu - m.mu) < 1e-9:
         return m, fac
     key = (pid, game.date)
     cache = book.__dict__.setdefault("_news_cache", {})
     if key not in cache:
-        cache[key] = replace(m, p_play=float(p), mu=m.mu * mult)
+        cache[key] = replace(m, p_play=float(p), mu=max(0.0, mu) * mult)
     return cache[key], fac
