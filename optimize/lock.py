@@ -147,6 +147,7 @@ def apply_reported(snap, st: SlotState, rec: dict, api_points: float):
 
 def single_slot_value(book: ModelBook, pid: str, games) -> tuple[float, list]:
     """Value of one player alone in a slot over his remaining games (used for proxies/backtest)."""
-    d = [(book.get(pid), book.opp_factor(pid, g.opp)) for g in games]
+    from data.news import game_model
+    d = [game_model(book, pid, g) for g in games]
     V, thr = backward_induction(d)
     return (V[0] if V else 0.0), thr

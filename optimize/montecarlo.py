@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from data.news import game_model
 from model.distributions import ModelBook, stable_seed
 from optimize.lineup import Plan, plan_week
 from optimize.lock import infer_slots
@@ -24,11 +25,11 @@ class Draws:
     def get(self, pid: str, game) -> np.ndarray:
         key = (pid, game.date)
         if key not in self._c:
-            m = self.book.get(pid)
+            m, fac = game_model(self.book, pid, game)
             rng = np.random.default_rng(stable_seed(self.seed, pid, game.date))
             playing = rng.random(self.n) < m.p_play
             idx = rng.integers(0, len(m.R), self.n)
-            self._c[key] = np.where(playing, m.mu * self.book.opp_factor(pid, game.opp) * m.R[idx], 0.0)
+            self._c[key] = np.where(playing, m.mu * fac * m.R[idx], 0.0)
         return self._c[key]
 
 

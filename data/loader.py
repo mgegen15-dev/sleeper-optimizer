@@ -176,6 +176,7 @@ def load(cfg: dict, now: datetime | None = None, offline: bool = False, extra_pr
     stat_dates = {(r.get("team"), r.get("date")) for rows in stats.values() for r in rows or [] if r.get("stats")}
     snap = Snapshot(now, season, W, league, rosters, users, matchups, players, logs, proj, dict(team_games), tx,
                     c.failures, c.fetched, stat_dates)
+    snap.offline = offline
     if cfg.get("private_api", {}).get("enabled", True):
         from pathlib import Path
         from data import sleeper_private as sp

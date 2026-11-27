@@ -26,6 +26,7 @@ python -m pytest -q
 | `state/sent.json` | What has already been sent, so alerts don't repeat. Not in git: persisted between runs with the Actions cache. |
 | `state/locks.json` | Locks you reported (email, workflow input, or hand edits). Not in git, same as above. |
 | `data/sleeper_private.py` | Optional read-only Sleeper GraphQL lock-state reader (`SLEEPER_TOKEN`). |
+| `data/news.py` | ESPN injuries feed → per-game P(play)/mean adjustments (rule-based). |
 | `data/locks.py` | Lock-reply parsing, fuzzy name matching, the Gmail IMAP reader. |
 | `config.yaml` | Every tunable. |
 
@@ -47,6 +48,26 @@ The cron runs every 30 min in UTC. `main.py --mode auto` does the timing itself 
 Each run costs about 1 Actions minute. Every 30 minutes that adds up to roughly 1,450 min/month, which is under the 2,000 free minutes for a private repo. If you need to save minutes, set the cron to `*/30 13-23,0-6 * * *`.
 
 Credentials only ever come from environment variables. The repo contains none.
+
+## Injury news (free, rule-based)
+Every run reads ESPN's public injuries feed (`site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries`, cached for 15 min) and matches players to Sleeper by name and team.
+
+**Which source counts.** ESPN's status is used only when its note is newer than Sleeper's `news_updated`. When Sleeper has no timestamp, ESPN is used only if its note is under 24 h old and no more optimistic than Sleeper's status.
+
+**Status → P(play).** Out 0, Doubtful .2, Questionable / Day-To-Day .6, Probable .9, healthy .97. An "Out" with a return date only covers the games before that date.
+
+**Keyword rules** (`news.rules` in config, case-insensitive, word boundaries):
+- "ruled out / won't play / out for" → P(play) 0. "not ruled out" is excluded.
+- "doubtful" → .2, "questionable" → .6, "probable" → .9.
+- "will play / cleared / available" → .95.
+- "game-time decision" → .6.
+- "minutes restriction" → mean × 0.8.
+- "rest / load management" → 0, but only when the note names a day.
+- "starting lineup" → mean × 1.05.
+
+A note that names a day ("Friday's game", "tonight", "tomorrow") applies to that date. Otherwise it applies to the team's next game. Mean multipliers are capped to [0.75, 1.10].
+
+Each applied adjustment for your players and your opponent's appears as one line in the email's Assumptions. Nothing about it goes to the CI log. If the feed fails, the run continues on Sleeper's status alone. To turn it off, set `news.enabled: false`.
 
 ## Reading lock state from Sleeper (optional, recommended)
 Sleeper's public API has no lock field. The website does have one, through its private GraphQL API:

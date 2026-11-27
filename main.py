@@ -76,6 +76,10 @@ def analyse(snap, cfg, mode, timings):
     W = snap.week
     wdates = {g.date for gs in snap.team_games.values() for g in gs if g.week == W}
     book = ModelBook(snap.logs, snap.players, snap.proj, cfg, proj_dates=wdates)
+    from data import news as nw
+    from data.sleeper import SleeperClient
+    news_client = SleeperClient(cfg["cache_dir"], cfg["http"]["timeout_s"], cfg["http"]["retries"], offline=getattr(snap, "offline", False))
+    snap.failures += nw.apply(snap, cfg, news_client, book)
     draws = Draws(book, sims["n_week"], sims["seed"])
     t = time.time()
     opp_rid = snap.opponent_rid(rid)
@@ -211,6 +215,11 @@ def analyse(snap, cfg, mode, timings):
         + ("; STALE fallback: " + ", ".join(k for k, v in snap.freshness.items() if v == 'stale-cache') if 'stale-cache' in snap.freshness.values() else "") + ".",
     ]
     assumptions += [s.conflict.strip() for s in me.states if s.conflict]
+    mine_opp = [str(p) for p in snap.roster(rid)["players"] + snap.roster(opp_rid)["players"]]
+    for pid in mine_opp:
+        adj = getattr(book, "news", {}).get(pid)
+        if adj:
+            assumptions.append(f"News: {snap.pname(pid)} - " + "; ".join(adj.notes))
     assumptions += getattr(snap, "lock_notes", [])
     stale = [s for s in me.states if s.pending]
     if stale:

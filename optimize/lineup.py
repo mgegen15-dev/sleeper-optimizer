@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from data.news import game_model
 from model.distributions import ModelBook, expected_max
 from optimize.lock import eligible
 
@@ -76,7 +77,7 @@ def plan_week(book: ModelBook, slot_names: list, pool: list, games_by_pid: dict,
         G = np.full((len(P), S), NEG)
         newv = np.zeros((len(P), S))
         for i, (pid, g) in enumerate(P):
-            m, fac = book.get(pid), book.opp_factor(pid, g.opp)
+            m, fac = game_model(book, pid, g)
             pin = pinned.get((pid, d))
             cvals = np.array([C[s] if C[s] is not None else np.nan for s in range(S)])
             em = expected_max(m, np.nan_to_num(cvals, nan=0.0), fac)

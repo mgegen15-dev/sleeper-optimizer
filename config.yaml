@@ -83,6 +83,22 @@ trades:
   depth_weight: 0.25      # screening proxy: value of bench depth relative to starters
   show: 5
 
+news:
+  enabled: true
+  recent_hours: 24             # ESPN note used without a Sleeper timestamp only if this fresh (and more pessimistic)
+  status_play_prob: {Out: 0.0, Doubtful: 0.2, Questionable: 0.6, Day-To-Day: 0.6, GTD: 0.6, Probable: 0.9, Active: 0.97, healthy: 0.97}
+  mean_mult_bounds: [0.75, 1.10]
+  rules:                       # case-insensitive regex on ESPN short+long comment; first P(play) rule wins
+    - {name: ruled_out, unless: '\bnot (been )?ruled out\b|\bhasn''t been ruled out\b', pattern: '\bruled out\b|\bwill not play\b|\bwon''t play\b|\bout for\b', play_prob: 0.0}
+    - {name: doubtful, pattern: '\bdoubtful\b', play_prob: 0.2}
+    - {name: questionable, pattern: '\bquestionable\b', play_prob: 0.6}
+    - {name: probable, pattern: '\bprobable\b', play_prob: 0.9}
+    - {name: will_play, pattern: '\bwill play\b|\bcleared\b|\bavailable\b|\bexpected to play\b', play_prob: 0.95}
+    - {name: game_time_decision, pattern: '\bgame-time decision\b|\bGTD\b', play_prob: 0.6}
+    - {name: minutes_limit, pattern: '\bminutes restriction\b|\bminutes limit\b|\blimited minutes\b', mean_mult: 0.8}
+    - {name: rest, pattern: '\brest\b|\bload management\b', play_prob: 0.0, needs_date: true}
+    - {name: starting, pattern: '\bstarting lineup\b|\bmove into the starting\b|\bwill start\b', mean_mult: 1.05}
+
 private_api:
   enabled: true     # read lock state from Sleeper's GraphQL if SLEEPER_TOKEN is set (read-only)
 

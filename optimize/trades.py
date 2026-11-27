@@ -36,20 +36,29 @@ def player_week_value(book_ros, snap, pid, weeks=None) -> float:
     return v
 
 
+_elig_cache = {}
+
+
+def _elig_row(p, positions, slot_names):
+    key = (p, tuple(slot_names))
+    if key not in _elig_cache:
+        _elig_cache[key] = np.array([eligible(sn, positions.get(p)) for sn in slot_names])
+    return _elig_cache[key]
+
+
 def proxy(pids, values, positions, slot_names, depth_weight):
     pids = list(pids)
     if not pids:
         return 0.0
-    M = np.full((len(pids), len(slot_names)), -1e6)
-    for i, p in enumerate(pids):
-        for s, sn in enumerate(slot_names):
-            if eligible(sn, positions.get(p)):
-                M[i, s] = values.get(p, 0.0)
+    E = np.array([_elig_row(p, positions, slot_names) for p in pids])
+    v = np.array([values.get(p, 0.0) for p in pids])
+    M = np.where(E, v[:, None], -1e6)
     r, c = linear_sum_assignment(M, maximize=True)
-    used = {pids[i] for i, j in zip(r, c) if M[i, j] > -1e5}
-    start = sum(M[i, j] for i, j in zip(r, c) if M[i, j] > -1e5)
-    bench = sorted((values.get(p, 0.0) for p in pids if p not in used), reverse=True)[:4]
-    return start + depth_weight * sum(bench)
+    ok = M[r, c] > -1e5
+    start = float(M[r, c][ok].sum())
+    used = set(r[ok].tolist())
+    bench = sorted((v[i] for i in range(len(pids)) if i not in used), reverse=True)[:4]
+    return start + depth_weight * float(sum(bench))
 
 
 def search(snap, cfg, book_ros, season_screen, base_screen, season_full, base_full, me_rid):

@@ -1,0 +1,114 @@
+{
+ "timestamp": "2026-11-27T19:39:23Z",
+ "status": "success",
+ "injuries": [
+  {
+   "id": "1",
+   "displayName": "Atlanta Hawks",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-11-26T22:44Z",
+     "shortComment": "Landale (hip) is out for Friday's game against the Celtics.",
+     "longComment": "Landale won't suit up Friday and this will be his fifth consecutive absence. His next chance to play will come against the Knicks on Sunday.",
+     "details": {
+      "fantasyStatus": {
+       "description": "OUT",
+       "abbreviation": "OUT"
+      },
+      "returnDate": "2026-11-29"
+     },
+     "athlete": {
+      "firstName": "Jock",
+      "lastName": "Landale",
+      "displayName": "Jock Landale",
+      "team": {
+       "abbreviation": "ATL"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "4",
+   "displayName": "Chicago Bulls",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-11-27T18:36Z",
+     "shortComment": "Smith (illness) is listed as probable for Saturday's game against Indiana.",
+     "longComment": "Smith was spotted at practice Friday, per K.C. Johnson of Chicago Sports Network. With the big man expected to play, fewer minutes will be on the table for Nic Claxton at center Saturday.",
+     "details": {
+      "fantasyStatus": {
+       "description": "GTD",
+       "abbreviation": "GTD"
+      },
+      "returnDate": "2026-11-28"
+     },
+     "athlete": {
+      "firstName": "Jalen",
+      "lastName": "Smith",
+      "displayName": "Jalen Smith",
+      "team": {
+       "abbreviation": "CHI"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "6",
+   "displayName": "Dallas Mavericks",
+   "injuries": [
+    {
+     "status": "Day-To-Day",
+     "date": "2026-11-27T19:07Z",
+     "shortComment": "Irving (knee) is listed as questionable for Friday's game against the Suns due to left knee injury management.",
+     "longComment": "Dallas could be exercising caution with Irving's surgically repaired knee. If he sits, Cooper Flagg should shoulder additional playmaking responsibilities, while Max Christie and Naji Marshall could see increased offensive opportunities. Irving's status warrants monitoring before tipoff.",
+     "details": {
+      "fantasyStatus": {
+       "description": "GTD",
+       "abbreviation": "GTD"
+      },
+      "returnDate": "2026-11-30"
+     },
+     "athlete": {
+      "firstName": "Kyrie",
+      "lastName": "Irving",
+      "displayName": "Kyrie Irving",
+      "team": {
+       "abbreviation": "DAL"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "16",
+   "displayName": "Minnesota Timberwolves",
+   "injuries": [
+    {
+     "status": "Out",
+     "date": "2026-11-27T18:52Z",
+     "shortComment": "Ball (ankle) has been ruled out for Friday's game against the Grizzlies. The guard was previously questionable after spraining his left ankle during Wednesday's win over Oklahoma City.",
+     "longComment": "With Ball and Anthony Edwards (knee) sidelined, Ayo Dosunmu and Bones Hyland should handle increased ball-handling responsibilities. Minnesota's depleted backcourt could also create additional scoring opportunities for Jaden McDaniels. Ball's next opportunity to return comes Monday against Sacramento.",
+     "details": {
+      "fantasyStatus": {
+       "description": "OUT",
+       "abbreviation": "OUT"
+      },
+      "returnDate": "2026-11-29"
+     },
+     "athlete": {
+      "firstName": "LaMelo",
+      "lastName": "Ball",
+      "displayName": "LaMelo Ball",
+      "team": {
+       "abbreviation": "MIN"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
