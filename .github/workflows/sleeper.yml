@@ -12,6 +12,10 @@ on:
         description: "players you've locked, comma-separated (e.g. giannis, jerome)"
         required: false
         default: ""
+      test:
+        description: "test send: subject [TEST], doesn't use up today's pregame email"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -56,7 +60,8 @@ jobs:
           SLEEPER_TOKEN: ${{ secrets.SLEEPER_TOKEN }}
           LOCKED_INPUT: ${{ github.event.inputs.locked }}
           MODE: ${{ github.event.inputs.mode || 'auto' }}
-        run: mkdir -p state && python main.py --quiet --mode "$MODE"
+          TEST_FLAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test != 'false' && '--test' || '' }}
+        run: mkdir -p state && python main.py --quiet --mode "$MODE" $TEST_FLAG
       - name: Save state
         if: always()
         uses: actions/cache/save@v4

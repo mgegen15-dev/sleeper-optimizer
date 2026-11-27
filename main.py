@@ -309,6 +309,7 @@ def _main(argv=None):
     ap.add_argument("--locked", default="", help="comma-separated names you have locked (same as an email reply)")
     ap.add_argument("--no-imap", action="store_true", help="skip reading lock replies from Gmail")
     ap.add_argument("--quiet", action="store_true", help="CI mode: log only mode/result/timings, never league data")
+    ap.add_argument("--test", action="store_true", help="test send: subject prefixed [TEST], nothing recorded in state")
     a = ap.parse_args(argv)
     cfg = load_cfg(a.config)
     import os
@@ -361,6 +362,8 @@ def _main(argv=None):
         timings["source_issues"] = len(snap.failures)
     ctx["assumptions"].append("Runtime: " + ", ".join(f"{k} {v}" for k, v in timings.items()))
     subj, txt, html = em.subject(ctx), em.text(ctx), em.html(ctx)
+    if a.test:
+        subj = "[TEST] " + subj
     Path(cfg["cache_dir"], "last_email.html").write_text(html, encoding="utf-8")
     Path(cfg["cache_dir"], "last_email.txt").write_text(subj + "\n\n" + txt, encoding="utf-8")
     if a.dry_run and QUIET:
@@ -377,6 +380,9 @@ def _main(argv=None):
         return 0          # quiet no-op until the secrets exist; nothing marked as sent
     from report.smtp import send
     send(cfg, subj, txt, html)
+    if a.test:                      # a test send must not use up today's pregame slot or mark finals
+        print(f"[{mode}] test email sent; " + ", ".join(f"{k} {v}" for k, v in timings.items()) if QUIET else f"test sent: {subj}")
+        return 0
     if mode == "pregame":
         state.setdefault("pregame_sent", []).append(now.date().isoformat())
     state.setdefault("finals_alerted", []).extend(finals)
