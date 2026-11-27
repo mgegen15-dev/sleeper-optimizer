@@ -73,7 +73,7 @@ def text(ctx) -> str:
     L += ["DO THIS NOW"]
     if ctx.get("do_now"):
         for d in ctx["do_now"]:
-            L.append(f"  [LOCK NOW] {d['player']} at {d['x']:.1f}  before {d['before']} tip  (next game ~{d['next_value']:.1f}, {_pp(d['dpwin'])})")
+            L.append(f"  [LOCK NOW] {d['player']} at {d['x']:.1f}  before {d['before']} tip  (riding {d.get('ride_games', 'his remaining games')} is worth ~{d['next_value']:.1f}, {_pp(d['dpwin'])})")
     else:
         L.append("  Nothing to tap right now.")
     L += ["", "LINEUP MOVES"]
@@ -181,7 +181,7 @@ def html(ctx) -> str:
     # 2) do this now
     if ctx.get("do_now"):
         inner = "".join(_action_card("LOCK", f"{d['player']} at {d['x']:.1f}",
-                                     f"Before {d['before']} tip · his next game is worth ~{d['next_value']:.1f}", d["dpwin"])
+                                     f"Before {d['before']} tip · riding {d.get('ride_games', 'his remaining games')} is worth ~{d['next_value']:.1f}", d["dpwin"])
                         for d in ctx["do_now"])
     else:
         inner = '<div class="t" style="font-size:14px;color:#374151">Nothing to tap right now.</div>'

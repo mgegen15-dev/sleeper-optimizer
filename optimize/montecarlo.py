@@ -132,6 +132,7 @@ def build_plan(book, inp, choices: dict) -> Plan:
     pool = list(inp["pool"])
     options = dict(inp["options"])
     blocked = {}
+    pinned = dict(inp["pinned"])
     for s in inp["states"]:
         if s.open_decision and s.pid in inp["roster"]:
             c = choices.get(s.index)
@@ -140,7 +141,9 @@ def build_plan(book, inp, choices: dict) -> Plan:
                 pool = [p for p in pool if p != s.pid]
             elif c == "hold" and s.next_game is not None:
                 blocked[s.index] = s.next_game.date
-    return plan_week(book, inp["slot_names"], pool, inp["games"], inp["positions"], frozen, options, inp["pinned"], blocked)
+                if s.pid in inp["games"] and any(g.date == s.next_game.date for g in inp["games"][s.pid]):
+                    pinned.setdefault((s.pid, s.next_game.date), s.index)   # riding = he plays his next game in this slot
+    return plan_week(book, inp["slot_names"], pool, inp["games"], inp["positions"], frozen, options, pinned, blocked)
 
 
 def solve_team(snap, rid, book, draws, vs: np.ndarray | None = None, inp=None, passes: int = 2) -> TeamWeek:

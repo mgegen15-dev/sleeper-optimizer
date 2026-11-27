@@ -345,9 +345,13 @@ def build_view(snap, cfg, mode, me, book, locks, moves, in_lineup, lineup_date, 
                              reason=f"Banked {s.x:.1f}" + (f" ({s.note.split()[1]})" if s.note.startswith("locked ") else "") + "."))
             continue
         if d is not None and d.choice == "lock":
+            team = snap.players.get(s.pid, {}).get("team")
+            left = [x for x in snap.week_games(team) if not x.started] if team else []
+            ride_games = " + ".join(clock(x, today) for x in left) or "no games"
             rows.append(dict(group="OPEN", slot=s.slot, name=name, pill="LOCK NOW", pts=s.x,
-                             reason=f"Lock {s.x:.1f} before {clock(g, today)} tip: beats what his next game is worth (~{d.threshold:.1f})."))
-            do_now.append(dict(player=name, x=s.x, before=clock(g, today), next_value=d.threshold, dpwin=callmap.get(name, {}).get("dpwin", 0)))
+                             reason=f"Lock {s.x:.1f} before {clock(g, today)} tip: riding his {len(left)} remaining game(s) ({ride_games}) is worth ~{d.threshold:.1f}."))
+            do_now.append(dict(player=name, x=s.x, before=clock(g, today), next_value=d.threshold, ride_games=ride_games,
+                               dpwin=callmap.get(name, {}).get("dpwin", 0)))
             continue
         if d is not None and not d.lockable:
             m, _ = game_model(book, s.pid, g) if g else (None, None)
