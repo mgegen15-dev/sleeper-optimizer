@@ -58,7 +58,7 @@ def test_attach_runner_ups_and_best_alternative():
     considered[0]["best_alternative"] = considered[0]["runners_up"][0]
     ctx2 = dict(move_cards=[])
     M.attach_alternatives(ctx2, considered, None)
-    assert ctx2["best_alternative"]["name"] == "Derik Queen" and "lost because it benches Nic Claxton" in ctx2["best_alternative"]["text"]
+    assert ctx2["best_alternative"]["name"] == "Derik Queen" and "lost because -0.2pp vs keeping the lineup (within noise)" in ctx2["best_alternative"]["text"]
 
 
 def test_tiebreak_prefers_higher_projection_and_flags_sleeper_disagreement():

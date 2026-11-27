@@ -92,6 +92,9 @@ def text(ctx) -> str:
             L.append(f"        {ctx['best_alternative']['text']}")
     for d in ctx.get("dont") or []:
         L.append(f"  DON'T: {d}")
+    for c in ctx.get("conditional") or []:
+        L.append(f"  IF: {c['player']} is confirmed active before {c['before'] or 'tip'}, swap him in for {c['replaces']} ({c['slot']}) "
+                 f"({c['gain'] * 100:+.1f} ± {c['se'] * 100:.1f}pp)")
     rows = ctx.get("players") or []
     if rows:
         L += ["", "WHERE EVERY PLAYER STANDS"]
@@ -201,6 +204,8 @@ def html(ctx) -> str:
         inner = _action_card("KEEP", "No swaps today. Leave the lineup as it is.",
                              (ctx.get("best_alternative") or {}).get("text", ""))
     inner += "".join(_action_card("DON'T", d, "") for d in ctx.get("dont") or [])
+    inner += "".join(_action_card("MOVE", f"IF {c['player']} is confirmed active before {c['before'] or 'tip'}: swap him in for {c['replaces']} ({c['slot']})",
+                                  "Only once his status is announced", c["gain"]) for c in ctx.get("conditional") or [])
     card("Lineup moves", inner)
     # 4) where every player stands
     rows = ctx.get("players") or []

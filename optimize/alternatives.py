@@ -174,3 +174,60 @@ def describe(c, pick_name=None):
     src = "bench" if c["source"] == "bench" else f"FA, drop {c['drop']}"
     tie = " (tie)" if c.get("tie") else ""
     return f"{c['name']} ({src}) {c['pwin'] * 100:.1f}% ({c['delta'] * 100:+.1f}pp){tie}"
+
+
+
+def conditional_swaps(snap, cfg, book, me, opp_totals, draws_seed, n, bench_ok=0.95):
+    """'If X is confirmed active, swap him in': for questionable bench players with a game tonight, compare
+    (on common random numbers) keeping the plan vs pinning X into the slot of the starter he'd replace,
+    with X's P(play) set to healthy. Returns [{player, replaces, slot, gain, se, before}]."""
+    import copy as _copy
+    from data.news import NewsAdj, game_model
+    from optimize.montecarlo import Draws
+    from optimize.selfcheck import beats, paired
+    rid = cfg["roster_id"]
+    day = snap.now.date().isoformat()
+    inp = me.inputs
+    r = snap.roster(rid)
+    reserve = set(r.get("reserve") or [])
+    starters = {s.pid for s in inp["states"] if s.pid}
+    tonight = me.plan.day_assign.get(day, {})
+    choices = {d.slot_index: d.choice for d in me.decisions}
+    locked = {x.pid for x in inp["states"] if x.locked}
+    out = []
+    for pid in map(str, r["players"]):
+        if pid in starters or pid in reserve or pid in tonight.values():
+            continue
+        g = _tonight(snap, pid, day)
+        if g is None:
+            continue
+        m, _ = game_model(book, pid, g)
+        if m.p_play >= bench_ok:
+            continue
+        b2 = _copy.copy(book)
+        b2.news = dict(getattr(book, "news", {}))
+        a = _copy.deepcopy(b2.news[pid]) if pid in b2.news else NewsAdj(pid, "conditional", "Active")
+        a.per_date.setdefault(g.date, {})["p"] = cfg["model"]["injury_play_prob"]["healthy"]
+        b2.news[pid] = a
+        b2._news_cache = {}
+        dr = Draws(b2, n, draws_seed)
+        keep_inp = dict(inp)                       # baseline = tonight's planned lineup, held fixed
+        keep_inp["pinned"] = {**inp["pinned"], **{(p_, day): sl_ for sl_, p_ in tonight.items()}}
+        base = simulate_plan(build_plan(b2, keep_inp, choices), dr)
+        best = None
+        for sl, occ in tonight.items():
+            if occ in locked:
+                continue
+            if not eligible(inp["slot_names"][sl], inp["positions"].get(pid) or snap.players.get(pid, {}).get("fantasy_positions")):
+                continue
+            inp2 = dict(inp)
+            inp2["pinned"] = {**inp["pinned"], **{(p_, day): sl_ for sl_, p_ in tonight.items() if sl_ != sl}, (pid, day): sl}
+            tot = simulate_plan(build_plan(b2, inp2, choices), dr)
+            d, se = paired(tot, base, opp_totals)
+            if best is None or d > best[0]:
+                best = (d, se, sl, occ, _tonight(snap, occ, day))
+        if best and beats(best[0], best[1]):
+            d, se, sl, occ, og = best
+            out.append(dict(player=snap.pname(pid), replaces=snap.pname(occ), slot=inp["slot_names"][sl], gain=d, se=se,
+                            before=og.tip.strftime("%I:%M %p").lstrip("0") if og and og.tip else None))
+    return out

@@ -302,7 +302,13 @@ def analyse(snap, cfg, mode, timings, state=None):
                              margin_p90=float(np.percentile(margin, 90))),
                lineup=lineup, moves=moves, locks=locks, locked_list=locked_list, waivers=waivers, trades=trades, assumptions=assumptions,
                playoff=playoff)
+    snap._cfg = cfg
     ctx.update(build_view(snap, cfg, mode, me, book, locks, moves, tonight | used, lineup_date, plays_on, ctx))
+    try:
+        ctx["conditional"] = alt.conditional_swaps(snap, cfg, book, me, opp.totals, sims["seed"], sims["n_week"])
+    except Exception as e:
+        ctx["conditional"] = []
+        snap.failures.append(f"Conditional-swap check failed ({type(e).__name__})")
     attach_alternatives(ctx, considered, snap)
     timings["selfcheck"] = sc.counts(dec_checks, swap_checks)
     today_s = snap.now.date().isoformat()
@@ -311,6 +317,24 @@ def analyse(snap, cfg, mode, timings, state=None):
         pid = next((p for p, nm in ((p, snap.pname(p)) for p in proofs) if nm == row["name"]), None)
         if pid and row["group"] == "OPEN":
             row["proof"] = proofs[pid]
+    from data.news import game_model as _gm
+
+    def _d(g):
+        t_ = g.tip.strftime("%I:%M").lstrip("0") if g.tip else "?"
+        return (t_ if g.date == today_s else f"{g.tip:%a} {t_}") if g.tip else g.date
+    for row in ctx.get("players") or []:
+        if row["group"] != "OPEN" or row.get("proof"):
+            continue
+        pid = next((s.pid for s in me.states if s.pid and snap.pname(s.pid) == row["name"]), None)
+        if not pid:
+            continue
+        team = snap.players.get(pid, {}).get("team")
+        gl = [g for g in snap.week_games(team) if not g.started] if team else []
+        steps = [st for sp in me.plan.slots for st in sp.seq if st.pid == pid]
+        bar = next((st.threshold for st in steps if st.threshold is not None), None)
+        parts = ["Games left: " + (", ".join(f"{_d(g)} ({_gm(book, pid, g)[0].p_play * 100:.0f}%)" for g in gl) or "none")]
+        parts.append(f"lock after tonight if >= {bar:.1f}" if bar is not None else "his last game counts if he stays in")
+        row["proof"] = " · ".join(parts)
     for d in ctx.get("do_now") or []:
         pid = next((p for p in proofs if snap.pname(p) == d["player"]), None)
         if pid:
@@ -354,11 +378,15 @@ def attach_alternatives(ctx, considered, snap):
                 best = (c, b)
         if best:
             c, b = best
-            why = []
-            if c["occupant"]:
-                why.append(f"it benches {c['occupant']}" + (" (forfeits his counting score)" if c["occupant"] else ""))
-            why.append(f"{b['delta'] * 100:+.1f}pp vs keeping the lineup")
             src = "bench" if b["source"] == "bench" else f"FA, drop {b['drop']}"
+            dpp = b["delta"] * 100
+            bar = ((getattr(snap, "_cfg", None) or {}).get("waivers") or {}).get("drop_threshold_pwin_pp", 3.0)
+            if b["source"] == "FA":
+                why = [f"it's a pickup: {dpp:+.1f}pp this week is below the +{bar:.1f}pp bar for a roster move, and it costs {b['drop']}"]
+            elif b.get("tie") or dpp <= 0:
+                why = [f"{dpp:+.1f}pp vs keeping the lineup" + (" (within noise)" if b.get("tie") else "")]
+            else:
+                why = [f"{dpp:+.1f}pp, not beyond noise once the rest of the week is re-planned"]
             ctx["best_alternative"] = dict(slot=c["slot"], name=b["name"], source=b["source"], drop=b["drop"], pwin=b["pwin"],
                                            delta=b["delta"], tie=b["tie"],
                                            text=f"Best alternative: {b['name']} ({src}) into {c['slot']} — {b['pwin'] * 100:.1f}%; lost because " + ", ".join(why) + ".")
