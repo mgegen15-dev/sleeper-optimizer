@@ -27,6 +27,7 @@ python -m pytest -q
 | `state/locks.json` | Locks you reported (email, workflow input, or hand edits). Not in git, same as above. |
 | `data/sleeper_private.py` | Optional read-only Sleeper GraphQL lock-state reader (`SLEEPER_TOKEN`). |
 | `data/news.py` | ESPN injuries feed → per-game P(play)/mean adjustments (rule-based). |
+| `model/news_llm.py` | Optional AI news step (Claude Haiku 5.5, structured output, capped adjustments). |
 | `data/locks.py` | Lock-reply parsing, fuzzy name matching, the Gmail IMAP reader. |
 | `config.yaml` | Every tunable. |
 
@@ -68,6 +69,31 @@ Every run reads ESPN's public injuries feed (`site.api.espn.com/apis/site/v2/spo
 A note that names a day ("Friday's game", "tonight", "tomorrow") applies to that date. Otherwise it applies to the team's next game. Mean multipliers are capped to [0.75, 1.10].
 
 Each applied adjustment for your players and your opponent's appears as one line in the email's Assumptions. Nothing about it goes to the CI log. If the feed fails, the run continues on Sleeper's status alone. To turn it off, set `news.enabled: false`.
+
+## AI news step (optional, Claude Haiku 5.5)
+This step runs on top of the rule-based news, on the pregame run only, at most once a day. For players on your roster and your opponent's who still have games this week, it sends Claude Haiku 5.5 only public data:
+- Sleeper player id, name, team and remaining game dates;
+- the ESPN injury status and comments;
+- ESPN headlines from the last 48 h that mention the player (`site.api.espn.com/apis/site/v2/sports/basketball/nba/news?limit=50`).
+
+It asks for a structured answer per player: `p_play`, `minutes_factor`, `confidence` and a short reason. The call is `client.messages.parse(model="claude-haiku-5-5", output_config={"effort": "low"}, output_format=...)`.
+
+**Guard rails** (`news_llm` in config):
+- Low-confidence answers are ignored.
+- P(play) moves from the rules value toward the AI value by at most 0.4.
+- An official Out (ESPN or Sleeper) is never raised.
+- `minutes_factor` is clamped to [0.75, 1.15].
+
+Each applied change appears as one line under Assumptions in the email. The CI log only shows `news_llm ok / skipped / failed` and a count. Refusals, API errors, rate limits and a missing key all fall back to rules-only.
+
+**Setup:**
+1. Create a key at console.anthropic.com → API Keys.
+2. Add it as the repo secret `ANTHROPIC_API_KEY`. Locally, export it as an environment variable; it is never written to a file here.
+3. In the Console, set a low monthly spend limit (for example $5) under Settings → Limits.
+
+**Expected cost:** one call a day with about 30 players is a few thousand tokens, roughly $0.002 a day (about $0.05 a month at Haiku 5.5's $0.10 / $0.50 per MTok). Local runs print the exact token usage and cost.
+
+**Disable it:** set `news_llm.enabled: false`.
 
 ## Reading lock state from Sleeper (optional, recommended)
 Sleeper's public API has no lock field. The website does have one, through its private GraphQL API:

@@ -70,7 +70,7 @@ def game_str(g):
 
 
 # ---------------------------------------------------------------------------------------- engine
-def analyse(snap, cfg, mode, timings):
+def analyse(snap, cfg, mode, timings, state=None):
     sims = cfg["sims"]
     rid = cfg["roster_id"]
     W = snap.week
@@ -80,6 +80,22 @@ def analyse(snap, cfg, mode, timings):
     from data.sleeper import SleeperClient
     news_client = SleeperClient(cfg["cache_dir"], cfg["http"]["timeout_s"], cfg["http"]["retries"], offline=getattr(snap, "offline", False))
     snap.failures += nw.apply(snap, cfg, news_client, book)
+    from model import news_llm
+    llm_status, llm_notes = "skipped", []
+    if mode == "pregame" and cfg.get("news_llm", {}).get("enabled"):
+        try:
+            feed = news_client.get(news_llm.NEWS_URL, "espn/news.json", max_age_h=0.25)
+            llm_status, llm_notes = news_llm.run(snap, cfg, book, state if state is not None else {}, mode, news_feed=feed)
+        except Exception as e:
+            llm_status, llm_notes = "failed", [f"AI news step failed ({type(e).__name__}); rule-based news only."]
+    timings["news_llm"] = llm_status
+    if llm_status == "ok":
+        timings["news_llm_adjusted"] = len(llm_notes)
+        u = getattr(book, "news_llm_usage", None)
+        if u and not QUIET:
+            print(f"news_llm usage: {u['input_tokens']} in / {u['output_tokens']} out tokens, ~${u['usd']}")
+    else:
+        snap.lock_notes = list(getattr(snap, "lock_notes", [])) + llm_notes   # shown under Assumptions
     draws = Draws(book, sims["n_week"], sims["seed"])
     t = time.time()
     opp_rid = snap.opponent_rid(rid)
@@ -359,7 +375,7 @@ def _main(argv=None):
         if not mode:
             print(f"[auto] nothing to send ({time.time() - t0:.1f}s)" if QUIET else f"[{now:%Y-%m-%d %H:%M} CT] auto: nothing to send")
             return 0          # no state write -> no commit from the workflow on idle runs
-    ctx, me = analyse(snap, cfg, mode, timings)
+    ctx, me = analyse(snap, cfg, mode, timings, state)
     if mode == "postgame" and not ctx["locks"] and not ctx["moves"]:
         print("[postgame] nothing to send (no open calls)")
         state.setdefault("finals_alerted", []).extend(finals)

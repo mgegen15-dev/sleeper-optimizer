@@ -58,6 +58,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           SLEEPER_TOKEN: ${{ secrets.SLEEPER_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LOCKED_INPUT: ${{ github.event.inputs.locked }}
           MODE: ${{ github.event.inputs.mode || 'auto' }}
           TEST_FLAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.test != 'false' && '--test' || '' }}

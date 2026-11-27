@@ -99,6 +99,14 @@ news:
     - {name: rest, pattern: '\brest\b|\bload management\b', play_prob: 0.0, needs_date: true}
     - {name: starting, pattern: '\bstarting lineup\b|\bmove into the starting\b|\bwill start\b', mean_mult: 1.05}
 
+news_llm:
+  enabled: true              # needs ANTHROPIC_API_KEY; pregame only, at most once a day
+  model: claude-haiku-5-5
+  max_dp_play: 0.4           # AI can move P(play) at most this far from the rules value
+  minutes_factor_bounds: [0.75, 1.15]
+  usd_per_mtok_in: 0.10      # for the local cost log only
+  usd_per_mtok_out: 0.50
+
 private_api:
   enabled: true     # read lock state from Sleeper's GraphQL if SLEEPER_TOKEN is set (read-only)
 

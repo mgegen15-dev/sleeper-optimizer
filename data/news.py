@@ -184,7 +184,9 @@ def apply(snap, cfg, client, book) -> list[str]:
     if not feed or "injuries" not in feed:
         return ["ESPN injuries feed unavailable; using Sleeper injury status only"]
     try:
-        book.news = build(snap, cfg, match(parse(feed), snap.players))
+        items = match(parse(feed), snap.players)
+        book.news_items = items
+        book.news = build(snap, cfg, items)
         return []
     except Exception as e:
         return [f"ESPN injuries feed could not be applied ({type(e).__name__}); using Sleeper status only"]
