@@ -104,11 +104,11 @@ def infer_slots(snap, rid: int, week: int | None = None, reported: dict | None =
         if st.x is not None and not st.locked and match is not None and W == snap.week:
             g0 = next((g for g in tg if g.date == match.date), None)
             started_in = played_as_starter(snap, pid, g0)
-            if started_in is False:
+            if started_in is not True:
+                # bench game, or we can't show he was starting at that tip: treat as NOT counting (conservative)
                 st.x, st.open_decision, st.lockable = None, False, False
-                st.note = f"{match.date} game was played on the bench (doesn't count)"
-            elif started_in is None:
-                st.note += " (start history before our first lineup check is assumed)"
+                st.note = (f"{match.date} game was played on the bench (doesn't count)" if started_in is False else
+                           f"{match.date} game: no record he was starting at tip, so it isn't counted")
         inel = (getattr(snap, "ineligible", None) or {}).get(pid)
         if inel and not st.locked and st.x is not None and match is not None:
             gid = next((str(g.game_id) for g in tg if g.date == match.date), None)

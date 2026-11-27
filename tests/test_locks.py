@@ -63,6 +63,7 @@ def make_snap(now=None, jerome=50.0):
                     dict(roster_id=8, matchup_id=1, starters=["9001", "9002"], starters_points=[48.0, 41.0], points=89.0)]}
     snap = Snapshot(now or t("2026-11-27", 12), "2026", 6, league, rosters, [], matchups, PLAYERS, logs, {}, tg, [])
     snap.stat_dates = {(g.team, g.date) for gs in tg.values() for g in gs if g.final}
+    snap.lineup_obs = [(t("2026-11-22", 12), {"1380", "2090"}), (t("2026-11-27", 11), {"1380", "2090"})]   # starters all week
     return snap
 
 

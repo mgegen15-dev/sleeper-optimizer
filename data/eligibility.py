@@ -31,7 +31,9 @@ def observe(snap, cfg, state):
 
 def from_observations(snap, cfg, state) -> dict:
     rid = cfg["roster_id"]
-    obs = [(datetime.fromisoformat(o["t"]), set(o["starters"])) for o in state.get("lineup_obs", {}).get(str(snap.week), [])]
+    seed = ((cfg.get("locks") or {}).get("lineup_seed") or {}).get(snap.week, []) or []
+    obs = [(datetime.fromisoformat(o["t"]), set(map(str, o["starters"])))
+           for o in list(seed) + state.get("lineup_obs", {}).get(str(snap.week), [])]
     out = {}
     for pid in map(str, snap.roster(rid)["players"]):
         team = snap.players.get(pid, {}).get("team")
@@ -60,8 +62,9 @@ def manual(snap, cfg, store) -> dict:
 
 def apply(snap, cfg, state, store):
     """Combine observed + manual ineligibility onto the snapshot. Returns notes for Assumptions."""
-    snap.lineup_obs = sorted((datetime.fromisoformat(o["t"]), set(o["starters"]))
-                             for o in state.get("lineup_obs", {}).get(str(snap.week), []))
+    seed = ((cfg.get("locks") or {}).get("lineup_seed") or {}).get(snap.week, []) or []
+    snap.lineup_obs = sorted((datetime.fromisoformat(o["t"]), set(map(str, o["starters"])))
+                             for o in list(seed) + state.get("lineup_obs", {}).get(str(snap.week), []))
     obs = from_observations(snap, cfg, state)
     man = manual(snap, cfg, store)
     merged = {}
