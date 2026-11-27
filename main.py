@@ -262,8 +262,52 @@ def analyse(snap, cfg, mode, timings, state=None):
                              margin_p90=float(np.percentile(margin, 90))),
                lineup=lineup, moves=moves, locks=locks, locked_list=locked_list, waivers=waivers, trades=trades, assumptions=assumptions,
                playoff=playoff)
+    # "also considered": every bench player and addable free agent for every slot open tonight
+    t_alt = time.time()
+    try:
+        from optimize import alternatives as alt
+        book_ros_alt = ModelBook(snap.logs, snap.players, snap.proj, cfg, proj_dates=wdates, ros=True)
+        vals = {str(p): tr.player_week_value(book_ros_alt, snap, str(p)) for p in snap.roster(rid)["players"]}
+        considered = alt.evaluate(snap, cfg, book, me, opp.totals, draws, vals)
+    except Exception as e:
+        considered = []
+        snap.failures.append(f"'Also considered' analysis failed ({type(e).__name__})")
+    timings["alternatives_s"] = round(time.time() - t_alt, 1)
     ctx.update(build_view(snap, cfg, mode, me, book, locks, moves, tonight | used, lineup_date, plays_on, ctx))
+    attach_alternatives(ctx, considered, snap)
     return ctx, me
+
+
+def attach_alternatives(ctx, considered, snap):
+    """Structured 'also considered' data for the renderer: runner-ups per move card, or the best rejected option."""
+    from optimize.alternatives import describe
+    ctx["considered"] = considered
+    for card in ctx.get("move_cards") or []:
+        hit = next((c for c in considered if c["moved"] and c["pick"]["name"] and f"Move {c['pick']['name']} into" in card["text"]), None)
+        if hit:
+            card["also"] = [dict(name=r["name"], source=r["source"], drop=r["drop"], pwin=r["pwin"], delta=r["delta"], tie=r["tie"])
+                            for r in hit["runners_up"]]
+            card["also_text"] = "Also considered: " + "; ".join(describe(r) for r in hit["runners_up"]) if hit["runners_up"] else ""
+            extra = [x for x in (hit.get("tiebreak"), hit.get("sleeper_note")) if x]
+            if extra:
+                card["also_text"] = (card["also_text"] + " " if card["also_text"] else "") + " ".join(extra)
+            card["tiebreak"] = hit.get("tiebreak")
+    if not ctx.get("move_cards"):
+        best = None
+        for c in considered:
+            b = c.get("best_alternative")
+            if b and (best is None or b["delta"] > best[1]["delta"]):
+                best = (c, b)
+        if best:
+            c, b = best
+            why = []
+            if c["occupant"]:
+                why.append(f"it benches {c['occupant']}" + (" (forfeits his counting score)" if c["occupant"] else ""))
+            why.append(f"{b['delta'] * 100:+.1f}pp vs keeping the lineup")
+            src = "bench" if b["source"] == "bench" else f"FA, drop {b['drop']}"
+            ctx["best_alternative"] = dict(slot=c["slot"], name=b["name"], source=b["source"], drop=b["drop"], pwin=b["pwin"],
+                                           delta=b["delta"], tie=b["tie"],
+                                           text=f"Best alternative: {b['name']} ({src}) into {c['slot']} — {b['pwin'] * 100:.1f}%; lost because " + ", ".join(why) + ".")
 
 
 def clock(g, today):

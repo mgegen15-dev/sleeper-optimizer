@@ -80,8 +80,12 @@ def text(ctx) -> str:
     if ctx.get("move_cards"):
         for m in ctx["move_cards"]:
             L.append(f"  MOVE: {m['text']}" + (f"  ({_pp(m['dpwin'])})" if m.get("dpwin") is not None else ""))
+            if m.get("also_text"):
+                L.append(f"        {m['also_text']}")
     else:
         L.append("  KEEP: No swaps today. Leave the lineup as it is.")
+        if ctx.get("best_alternative"):
+            L.append(f"        {ctx['best_alternative']['text']}")
     for d in ctx.get("dont") or []:
         L.append(f"  DON'T: {d}")
     rows = ctx.get("players") or []
@@ -184,9 +188,10 @@ def html(ctx) -> str:
     card("Do this now", inner)
     # 3) lineup moves
     if ctx.get("move_cards"):
-        inner = "".join(_action_card("MOVE", m["text"], "", m.get("dpwin")) for m in ctx["move_cards"])
+        inner = "".join(_action_card("MOVE", m["text"], m.get("also_text", ""), m.get("dpwin")) for m in ctx["move_cards"])
     else:
-        inner = _action_card("KEEP", "No swaps today. Leave the lineup as it is.", "")
+        inner = _action_card("KEEP", "No swaps today. Leave the lineup as it is.",
+                             (ctx.get("best_alternative") or {}).get("text", ""))
     inner += "".join(_action_card("DON'T", d, "") for d in ctx.get("dont") or [])
     card("Lineup moves", inner)
     # 4) where every player stands

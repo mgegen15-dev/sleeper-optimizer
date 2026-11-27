@@ -72,7 +72,7 @@ def plan_week(book: ModelBook, slot_names: list, pool: list, games_by_pid: dict,
 
     days = sorted({g.date for pid in pool for g in games_by_pid.get(pid, [])}, reverse=True)
     day_assign = {}
-    slot_of = {}   # a player streams through ONE slot all week (keeps lock bookkeeping consistent)
+    slot_of = {pid: sl for (pid, _d), sl in pinned.items()}   # a player streams through ONE slot all week; pins fix it
     for d in days:
         P = [(pid, g) for pid in pool for g in games_by_pid.get(pid, []) if g.date == d]
         if not P:
