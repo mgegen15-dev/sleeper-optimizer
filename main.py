@@ -148,29 +148,40 @@ def analyse(snap, cfg, mode, timings, state=None):
                 used.add(nxt)
         new_pid = assign.get(sp.index)
         if new_pid and new_pid != stt.pid:
-            changed.append((sp.slot, new_pid))
+            changed.append((sp.slot, new_pid, stt))
         lineup.append(row)
     current = {s.pid for s in me.states if s.pid}
-    for slot, pid in changed:            # net changes only: a swap between two UTIL slots isn't a move
+    in_lineup = used | tonight
+    for slot, pid, stt in changed:       # net changes only: a swap between two UTIL slots isn't a move
         if pid not in current:
             moves.append(f"start {snap.pname(pid)} at {slot}")
         elif not (slot == "UTIL" and next(s.slot for s in me.states if s.pid == pid) == "UTIL"):
             moves.append(f"move {snap.pname(pid)} to {slot}")
     frozen_idx = {sp.index for sp in me.plan.slots if sp.frozen is not None}
-    benched = [s for s in me.states if s.pid and not s.locked and s.index not in frozen_idx and plays_on(s.pid, lineup_date)
-               and s.pid not in tonight and not any(sp.keep and sp.option_pid == s.pid for sp in me.plan.slots)]
-    for s in benched:
-        moves.append(f"bench {snap.pname(s.pid)} tonight (his game shouldn't count in {s.slot})")
+    for s in me.states:                  # anyone leaving the lineup: say what it costs
+        if not s.pid or s.locked or s.index in frozen_idx or s.pid in in_lineup:
+            continue
+        cost = f": benching him forfeits his {s.x:.1f}" if s.x is not None else ""
+        if s.x is None and not plays_on(s.pid, lineup_date):
+            continue
+        moves.append(f"bench {snap.pname(s.pid)}" + (cost or " tonight (his game shouldn't count)"))
 
     locked_list = [f"{snap.pname(s.pid)} {s.x:.1f} ({s.lock_source or 'inferred'})" for s in me.states if s.locked]
 
     # ---------------- lock / ride calls
     locks = []
+    LABEL = {"lock": "LOCK", "hold": "RIDE", "ride": "BENCH"}
     for d in me.decisions:
-        chosen, other = (d.pwin_lock, d.pwin_ride) if d.choice == "lock" else (d.pwin_ride, d.pwin_lock)
-        locks.append(dict(decision=d.choice.upper(), player=snap.pname(d.pid), slot=d.slot, x=d.x, threshold=d.threshold,
-                          pw_lock=d.pwin_lock, pw_ride=d.pwin_ride, dpwin=chosen - other,
-                          deadline=tip_str(d.next_game)))
+        pwmap = {"lock": d.pwin_lock, "hold": d.pwin_hold, "ride": d.pwin_bench}
+        chosen = pwmap[d.choice]
+        others = [v for k, v in pwmap.items() if k != d.choice and v is not None]
+        dp = chosen - max(others) if others else 0.0
+        note = "" if d.lockable else "not lockable (benched since that game began)"
+        if d.choice == "ride":
+            note = (note + "; " if note else "") + f"benching {snap.pname(d.pid)} forfeits his {d.x:.1f}"
+        locks.append(dict(decision=LABEL[d.choice], player=snap.pname(d.pid), slot=d.slot, x=d.x,
+                          threshold=d.threshold if d.lockable else None, pw_lock=d.pwin_lock, pw_hold=d.pwin_hold,
+                          pw_bench=d.pwin_bench, pw_ride=d.pwin_ride, dpwin=dp, note=note, deadline=tip_str(d.next_game)))
     locks.sort(key=lambda d: -abs(d["dpwin"]))
 
     assumptions = []
@@ -325,6 +336,7 @@ def ingest_locks(snap, cfg, a, persist=True):
     if persist:
         lk.save_locks(path, store)
     snap.reported_locks = {cfg["roster_id"]: store["weeks"].get(str(snap.week), {})}
+    snap.lock_store = store
     snap.lock_notes = notes
     return notes
 
@@ -393,12 +405,17 @@ def _main(argv=None):
     snap = load(cfg, now=now, offline=a.offline)
     timings["load_s"] = round(time.time() - t0, 1)
     ingest_locks(snap, cfg, a, persist=not a.dry_run)
+    from data import eligibility as elig
+    elig.observe(snap, cfg, state)
+    snap.lock_notes = list(getattr(snap, "lock_notes", [])) + elig.apply(snap, cfg, state, snap.lock_store)
     mode, finals, label = a.mode, [], None
     if mode == "auto":
         mode, finals, label = decide_auto(snap, cfg, state)
         if not mode:
             print(f"[auto] nothing to send ({time.time() - t0:.1f}s)" if QUIET else f"[{now:%Y-%m-%d %H:%M} CT] auto: nothing to send")
-            return 0          # no state write -> no commit from the workflow on idle runs
+            if not a.dry_run:
+                save_state(cfg, state)    # keeps lineup observations (lock eligibility); cached, not committed
+            return 0
     ctx, me = analyse(snap, cfg, mode, timings, state)
     if mode == "postgame" and label != "lock-window" and not ctx["locks"] and not ctx["moves"]:
         print("[postgame] nothing to send (no open calls)")

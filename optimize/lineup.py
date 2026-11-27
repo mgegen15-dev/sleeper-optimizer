@@ -54,10 +54,13 @@ class Plan:
 
 
 def plan_week(book: ModelBook, slot_names: list, pool: list, games_by_pid: dict, positions: dict,
-              frozen: dict | None = None, options: dict | None = None, pinned: dict | None = None) -> Plan:
+              frozen: dict | None = None, options: dict | None = None, pinned: dict | None = None,
+              blocked: dict | None = None) -> Plan:
     """pool: pids available to start. games_by_pid: pid -> remaining Games (chronological).
     frozen: slot -> locked value. options: slot -> (pid, x). pinned: (pid, date) -> slot (game in progress)."""
-    frozen, options, pinned = frozen or {}, options or {}, pinned or {}
+    frozen, options, pinned, blocked = frozen or {}, options or {}, pinned or {}, blocked or {}
+    # blocked: slot -> date. The slot's occupant is being held (his counting score stays alive until his
+    # next game), so no one else can play in that slot before that date without forfeiting it.
     S = len(slot_names)
     C = [None] * S
     seqs = [[] for _ in range(S)]
@@ -88,6 +91,8 @@ def plan_week(book: ModelBook, slot_names: list, pool: list, games_by_pid: dict,
                 if pin is not None and pin != s:
                     continue
                 if pid in slot_of and slot_of[pid] != s:
+                    continue
+                if s in blocked and d < blocked[s]:
                     continue
                 nv = ex if C[s] is None else float(em[s])
                 newv[i, s] = nv

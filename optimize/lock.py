@@ -49,7 +49,8 @@ class SlotState:
     next_game: object = None
     in_progress: object = None
     pending: bool = False         # a later game is final but its stat lines aren't posted yet
-    lock_source: str = ""         # "inferred" | "reported"
+    lock_source: str = ""         # "inferred" | "reported" | "sleeper"
+    lockable: bool = True         # False: the counting game is ineligible for lock-in (benched since it began)
     conflict: str = ""            # reported lock contradicted by API evidence
     note: str = ""
 
@@ -99,6 +100,12 @@ def infer_slots(snap, rid: int, week: int | None = None, reported: dict | None =
                 st.conflict = f"{snap.pname(pid)}: you reported a lock but Sleeper shows none; using Sleeper."
         elif reported and pid in reported:
             apply_reported(snap, st, reported[pid], sp)
+        inel = (getattr(snap, "ineligible", None) or {}).get(pid)
+        if inel and not st.locked and st.x is not None and match is not None:
+            gid = next((str(g.game_id) for g in tg if g.date == match.date), None)
+            if "*" in inel or gid in inel:
+                st.lockable = False
+                st.note = f"not lockable ({match.date} game: benched since it began)"
         out.append(st)
     if reported:
         starters = {s.pid for s in out}

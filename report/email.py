@@ -45,8 +45,10 @@ def text(ctx) -> str:
     L += ["LOCK/RIDE CALLS"]
     if ctx["locks"]:
         for d in ctx["locks"]:
-            L.append(f"  {d['decision']:<5} {d['player']:<24} {d['slot']:<5} score {d['x']:.1f} vs threshold {d['threshold']:.1f}"
-                     f"  P(win) lock {d['pw_lock'] * 100:.1f}% / ride {d['pw_ride'] * 100:.1f}% ({_pp(d['dpwin'])})  decide before {d['deadline']}")
+            thr = f"vs threshold {d['threshold']:.1f}" if d.get("threshold") is not None else "(not lockable)"
+            pws = " / ".join(f"{k} {v * 100:.1f}%" for k, v in (("lock", d.get("pw_lock")), ("ride", d.get("pw_hold")), ("bench", d.get("pw_bench"))) if v is not None)
+            L.append(f"  {d['decision']:<5} {d['player']:<24} {d['slot']:<5} score {d['x']:.1f} {thr}"
+                     f"  P(win) {pws} ({_pp(d['dpwin'])})  decide before {d['deadline']}" + (f"  [{d['note']}]" if d.get("note") else ""))
     else:
         L.append("  None open.")
     L += [""]
@@ -100,7 +102,8 @@ def html(ctx) -> str:
     parts.append(sec("Lock / ride calls"))
     if ctx["locks"]:
         parts.append(table(["Call", "Player", "Score", "Threshold", "ΔP(win)", "Before"],
-                           [[d["decision"], d["player"], f"{d['x']:.1f}", f"{d['threshold']:.1f}", _pp(d["dpwin"]), d["deadline"]] for d in ctx["locks"]]))
+                           [[d["decision"], d["player"] + (f" ({d['note']})" if d.get("note") else ""), f"{d['x']:.1f}",
+                             f"{d['threshold']:.1f}" if d.get("threshold") is not None else "not lockable", _pp(d["dpwin"]), d["deadline"]] for d in ctx["locks"]]))
     else:
         parts.append('<p style="font-size:13px">None open.</p>')
     if ctx.get("waivers") is not None:

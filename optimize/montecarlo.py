@@ -72,6 +72,9 @@ class Decision:
     pwin_lock: float | None = None
     pwin_ride: float | None = None
     next_game: object = None
+    lockable: bool = True
+    pwin_hold: float | None = None      # keep him in the slot until his next game (no lock)
+    pwin_bench: float | None = None     # bench him now and use the slot: forfeits his counting score
 
 
 @dataclass
@@ -123,15 +126,21 @@ def team_inputs(snap, rid: int, roster_override=None, available_from: dict | Non
 
 
 def build_plan(book, inp, choices: dict) -> Plan:
+    """choices per open decision: "lock" (freeze his score), "hold" (keep him in the slot until his next
+    game; his score is dropped once that game starts), "ride" (bench him now: forfeits the score, frees the slot)."""
     frozen = dict(inp["frozen"])
     pool = list(inp["pool"])
     options = dict(inp["options"])
+    blocked = {}
     for s in inp["states"]:
         if s.open_decision and s.pid in inp["roster"]:
-            if choices.get(s.index) == "lock":
+            c = choices.get(s.index)
+            if c == "lock" and s.lockable:
                 frozen[s.index] = s.x
                 pool = [p for p in pool if p != s.pid]
-    return plan_week(book, inp["slot_names"], pool, inp["games"], inp["positions"], frozen, options, inp["pinned"])
+            elif c == "hold" and s.next_game is not None:
+                blocked[s.index] = s.next_game.date
+    return plan_week(book, inp["slot_names"], pool, inp["games"], inp["positions"], frozen, options, inp["pinned"], blocked)
 
 
 def solve_team(snap, rid, book, draws, vs: np.ndarray | None = None, inp=None, passes: int = 2) -> TeamWeek:
@@ -139,7 +148,7 @@ def solve_team(snap, rid, book, draws, vs: np.ndarray | None = None, inp=None, p
     opponent: best lineup + threshold policy). With `vs` (opponent totals): maximise P(win)."""
     inp = inp or team_inputs(snap, rid)
     opens = [s for s in inp["states"] if s.open_decision and s.pid in inp["roster"]]
-    choices = {s.index: "ride" for s in opens}
+    choices = {s.index: "hold" for s in opens}
     cache = {}
 
     def evaluate(ch):
@@ -153,20 +162,26 @@ def solve_team(snap, rid, book, draws, vs: np.ndarray | None = None, inp=None, p
     for _ in range(passes):          # coordinate ascent: flip one decision at a time if it helps
         changed = False
         for s in opens:
-            cur = evaluate(choices)[2]
-            alt = {**choices, s.index: "lock" if choices[s.index] == "ride" else "ride"}
-            if evaluate(alt)[2] > cur + 1e-12:
-                choices, changed = alt, True
+            for c in (["lock"] if s.lockable else []) + ["hold", "ride"]:
+                if c == choices[s.index]:
+                    continue
+                alt = {**choices, s.index: c}
+                if evaluate(alt)[2] > evaluate(choices)[2] + 1e-12:
+                    choices, changed = alt, True
         if not changed:
             break
     plan, tot, _ = evaluate(choices)
     decs = []
     for s in opens:
-        lk = evaluate({**choices, s.index: "lock"})
-        rd = evaluate({**choices, s.index: "ride"})
-        d = Decision(s.index, s.slot, s.pid, s.x, choices[s.index], lk[0].ev, rd[0].ev,
-                     s.x + (rd[0].ev - lk[0].ev), next_game=s.next_game)
+        hd = evaluate({**choices, s.index: "hold"})
+        bn = evaluate({**choices, s.index: "ride"})
+        lk = evaluate({**choices, s.index: "lock"}) if s.lockable else None
+        best_ride = hd if hd[0].ev >= bn[0].ev else bn
+        d = Decision(s.index, s.slot, s.pid, s.x, choices[s.index], lk[0].ev if lk else float("nan"), best_ride[0].ev,
+                     (s.x + (best_ride[0].ev - lk[0].ev)) if lk else float("nan"), next_game=s.next_game, lockable=s.lockable)
         if vs is not None:
-            d.pwin_lock, d.pwin_ride = p_win(lk[1], vs), p_win(rd[1], vs)
+            d.pwin_lock = p_win(lk[1], vs) if lk else None
+            d.pwin_hold, d.pwin_bench = p_win(hd[1], vs), p_win(bn[1], vs)
+            d.pwin_ride = max(d.pwin_hold, d.pwin_bench)
         decs.append(d)
     return TeamWeek(rid, inp["states"], plan, tot, decs, inp)

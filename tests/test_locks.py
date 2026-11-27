@@ -179,7 +179,7 @@ def test_engine_freezes_reported_lock_and_is_deterministic():
 def test_reported_lock_changes_pwin_when_engine_would_ride():
     snap = make_snap(jerome=12.0)                         # poor counting score: engine wants to ride
     me0, pw0 = _pwin(snap, {})
-    assert next(d for d in me0.decisions if d.pid == "2090").choice == "ride"
+    assert next(d for d in me0.decisions if d.pid == "2090").choice in ("hold", "ride")
     rec = {"2090": dict(date="2026-11-25", score=12.0, source="manual")}
     me1, pw1 = _pwin(snap, rec)
     assert me1.plan.slots[1].frozen == 12.0

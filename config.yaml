@@ -117,6 +117,8 @@ locks:
   file: state/locks.json      # reported locks (email replies, workflow input, or hand edits)
   imap_host: imap.gmail.com
   fuzzy_cutoff: 0.8           # difflib similarity needed for a fuzzy name match
+  ineligible:                 # manual: {week: [names]} whose games so far are NOT lockable (benched since tip)
+    6: [Kyrie Irving]
   nicknames:                  # extra aliases -> full name (matched against MY roster only)
     AD: Anthony Davis
     Giannis: Giannis Antetokounmpo

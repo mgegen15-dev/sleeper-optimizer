@@ -56,10 +56,25 @@ def new_text(body: str) -> str:
     return "\n".join(out).strip()
 
 
+INELIG_RE = re.compile(r"(?<![a-z])ineligible\b\s*:?\s*(.+)", re.I)
+
+
+def parse_ineligible(body: str) -> list[str]:
+    names = []
+    for ln in new_text(body).split("\n"):
+        m = INELIG_RE.search(ln)
+        if m:
+            for tok in re.split(r",|;|/|&|\band\b|\+", m.group(1), flags=re.I):
+                tok = tok.strip(" .!?:\t")
+                if tok:
+                    names.append(tok)
+    return names
+
+
 def parse_names(body: str) -> list[str]:
     names = []
     for ln in new_text(body).split("\n"):
-        if UNLOCK_RE.search(ln):
+        if UNLOCK_RE.search(ln) or INELIG_RE.search(ln):
             continue
         m = LOCK_RE.search(ln)
         if not m:
@@ -232,6 +247,16 @@ def ingest(snap, cfg, locks: dict, inbox=None, manual: str | None = None):
                 names = parse_names(body)
                 if names:
                     notes += record(snap, locks, names, when, "email", roster, nick, cutoff, mid)
+                for nm in parse_ineligible(body):
+                    pid, status, cands = match_name(nm, roster, snap.players, nick, cutoff)
+                    if status != "ok":
+                        notes.append(f"ineligible '{nm}' not recorded ({status})")
+                        continue
+                    team = snap.players.get(pid, {}).get("team")
+                    gids = [str(g.game_id) for g in snap.week_games(team) if g.started and (g.tip is None or g.tip <= when)]
+                    locks.setdefault("ineligible", {}).setdefault(str(snap.week), {}).setdefault(pid, [])
+                    locks["ineligible"][str(snap.week)][pid] = sorted(set(locks["ineligible"][str(snap.week)][pid]) | set(gids))
+                    notes.append(f"recorded: {snap.pname(pid)} games so far not lockable (email)")
                 locks["processed"].append(mid)
         except Exception as e:
             notes.append(f"IMAP lock check failed ({type(e).__name__}: {e}); using stored/inferred locks only")
