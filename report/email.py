@@ -7,6 +7,19 @@ from html import escape
 FOOTER = "Reply 'locked name, name' to record locks."
 
 
+def split_waivers(ws):
+    """Only moves that clear the configured thresholds are actions; at most 2 others as a watchlist."""
+    ws = ws or []
+    rec = [w for w in ws if w["recommend"]]
+    score = lambda w: w["dplayoff"] * 100 + 0.5 * w["dpwin"] * 100      # playoff pp + half a this-week pp
+    watch = sorted((w for w in ws if not w["recommend"] and score(w) > 0), key=lambda w: -score(w))[:2]
+    return rec, watch
+
+
+def watch_line(w):
+    return f"{w['add']} ({w['dpwin'] * 100:+.1f}pp win, {w['dplayoff'] * 100:+.1f}pp playoffs; not worth a roster spot yet)"
+
+
 def subject(ctx) -> str:
     return f"Sleeper | {ctx['date']} | P(win) {ctx['pwin'] * 100:.0f}% | {ctx['n_actions']} actions"
 
@@ -39,13 +52,14 @@ def text(ctx) -> str:
     L += [""]
     if ctx.get("waivers") is not None:
         L += ["WAIVER ADDS"]
-        rec = [w for w in ctx["waivers"] if w["recommend"]]
-        for w in (rec or ctx["waivers"][:3]):
-            tag = "" if w["recommend"] else " (below threshold - FYI)"
+        rec, watch = split_waivers(ctx["waivers"])
+        for w in rec:
             L.append(f"  +{w['add']} / -{w['drop']}  bid ${w['bid']}{' (waivers)' if w['waivers'] else ' (instant FA)'}  "
-                     f"P(win) {_pp(w['dpwin'])}  playoffs {_pp(w['dplayoff'])}{tag}")
-        if not ctx["waivers"]:
-            L.append("  No candidates.")
+                     f"P(win) {_pp(w['dpwin'])}  playoffs {_pp(w['dplayoff'])}")
+        if not rec:
+            L.append("  No moves. Best available adds are below the bar.")
+        for w in watch:
+            L.append(f"  Watch: {watch_line(w)}")
         L += [""]
     if ctx.get("trades") is not None:
         L += ["TRADE IDEAS"]
@@ -91,10 +105,12 @@ def html(ctx) -> str:
         parts.append('<p style="font-size:13px">None open.</p>')
     if ctx.get("waivers") is not None:
         parts.append(sec("Waiver adds"))
-        ws = [w for w in ctx["waivers"] if w["recommend"]] or ctx["waivers"][:3]
-        parts.append(table(["Add", "Drop", "Bid", "ΔP(win)", "ΔPlayoffs", ""],
-                           [[w["add"], w["drop"], f"${w['bid']}" + (" W" if w["waivers"] else " FA"), _pp(w["dpwin"]), _pp(w["dplayoff"]),
-                             "do it" if w["recommend"] else "FYI"] for w in ws]) if ws else '<p style="font-size:13px">No candidates.</p>')
+        rec, watch = split_waivers(ctx["waivers"])
+        parts.append(table(["Add", "Drop", "Bid", "ΔP(win)", "ΔPlayoffs"],
+                           [[w["add"], w["drop"], f"${w['bid']}" + (" W" if w["waivers"] else " FA"), _pp(w["dpwin"]), _pp(w["dplayoff"])]
+                            for w in rec]) if rec else '<p style="font-size:13px">No moves. Best available adds are below the bar.</p>')
+        for w in watch:
+            parts.append(f'<p style="font-size:12px;color:#888;margin:4px 0">Watch: {escape(watch_line(w))}</p>')
     if ctx.get("trades") is not None:
         parts.append(sec("Trade ideas"))
         parts.append(table(["Team", "Give", "Get", "Mine", "Theirs"],

@@ -53,8 +53,11 @@ sims:
   n_season_screen: 3000
 
 schedule:
-  pregame_minutes_before: 60   # send ~60 min before first tip of the day
-  pregame_window_minutes: 15   # send when 0 < minutes-to-first-tip <= before + window (cron every 30 min)
+  pregame_lead_min: 90         # pregame goes out 90 min before the day's FIRST tip (whole slate, CT)
+  cron_interval_min: 15        # matches the workflow cron; later than this counts as "catch-up"
+  fallback_first_tip: "12:00"  # if tip times are unknown (ESPN down) but games exist, assume this
+  lock_window_min: 45          # remind about an open lock call whose next game tips within 45 min
+  lock_batch_min: 120          # one reminder covers every open call tipping within 2 h
 
 season:
   playoff_teams: 6

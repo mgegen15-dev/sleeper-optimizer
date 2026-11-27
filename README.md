@@ -42,8 +42,14 @@ python -m pytest -q
 5. Nothing else to configure. The workflow only needs read access (`contents: read`). `state/` is saved and restored with `actions/cache`, never committed, and Actions caches can't be downloaded by the public.
 6. Go to Actions → sleeper-alerts → Run workflow, set mode `pregame`, and run it once to test.
 
-The cron runs every 30 min in UTC. `main.py --mode auto` does the timing itself in America/Chicago, so daylight-saving changes are handled:
-- **Pregame:** sent on the first run that falls 0–75 min before the day's first tip, at most once per day.
+The cron runs every 15 min in UTC. Public-repo Actions minutes are free. `main.py --mode auto` does the timing itself in America/Chicago, so daylight-saving changes are handled:
+- **Pregame:** worked out per day from that day's first tip across the whole NBA slate (Central time).
+  - It goes out 90 min before that tip (`schedule.pregame_lead_min`).
+  - **catch-up:** if the cron runs late, any run before the first tip sends it.
+  - **late:** if the first tip has passed but some of your or your opponent's players haven't tipped, it still goes out, labelled "late".
+  - If tip times are unknown, a 12:00 CT first tip is assumed.
+  - At most one pregame email per day.
+- **Lock window:** an open lock call whose next game tips within 45 min triggers a reminder right away. One reminder covers every call tipping within 2 h.
 - **Postgame:** sent when one of your players' games has gone final and its stat lines are posted. If another of your games is due to finish within about 25 min, it waits so both are covered in one email. Nothing is sent if there's no open call.
 
 Each run costs about 1 Actions minute. Every 30 minutes that adds up to roughly 1,450 min/month, which is under the 2,000 free minutes for a private repo. If you need to save minutes, set the cron to `*/30 13-23,0-6 * * *`.

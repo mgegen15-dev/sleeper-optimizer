@@ -58,6 +58,7 @@ def save_state(cfg, st):
     p.parent.mkdir(parents=True, exist_ok=True)
     st["pregame_sent"] = st.get("pregame_sent", [])[-30:]
     st["finals_alerted"] = st.get("finals_alerted", [])[-300:]
+    st["lock_alerts"] = st.get("lock_alerts", [])[-300:]
     p.write_text(json.dumps(st, indent=1), encoding="utf-8")
 
 
@@ -254,15 +255,38 @@ def analyse(snap, cfg, mode, timings, state=None):
 
 
 # ---------------------------------------------------------------------------------------- auto mode
+def open_calls(snap, cfg):
+    """[(key, next_tip)] for my open lock/ride decisions (after reported/Sleeper locks are applied)."""
+    from optimize.lock import infer_slots
+    rid = cfg["roster_id"]
+    out = []
+    for s in infer_slots(snap, rid, reported=(snap.reported_locks or {}).get(rid)):
+        if s.open_decision and s.next_game is not None:
+            out.append((f"{s.pid}:{s.next_game.game_id}", s.next_game.tip))
+    return out
+
+
 def decide_auto(snap, cfg, state):
+    """-> (mode, finals_to_mark, label). See optimize/schedule.py for the rules."""
+    from optimize import schedule as sch
     sc = cfg["schedule"]
     today = snap.now.date().isoformat()
-    tips = [g.tip for gs in snap.team_games.values() for g in gs if g.date == today and g.tip]
-    if tips and today not in state.get("pregame_sent", []):
-        mins = (min(tips) - snap.now).total_seconds() / 60
-        if 0 < mins <= sc["pregame_minutes_before"] + sc["pregame_window_minutes"]:
-            return "pregame", []
-    r = snap.roster(cfg["roster_id"])
+    games_today = [g for gs in snap.team_games.values() for g in gs if g.date == today]
+    tips = [g.tip for g in games_today]
+    rid = cfg["roster_id"]
+    opp = snap.opponent_rid(rid)
+    mine_opp_teams = {snap.players.get(str(p), {}).get("team") for r in (rid, opp) if r for p in snap.roster(r)["players"]} - {None}
+    my_tips = [g.tip for g in games_today if g.team in mine_opp_teams and not g.started]
+    send, label, _ = sch.pregame_decision(snap.now, tips, my_tips, today in state.get("pregame_sent", []),
+                                          sc["pregame_lead_min"], sc["cron_interval_min"], sc["fallback_first_tip"],
+                                          have_games=bool(games_today))
+    if send:
+        return "pregame", [], label
+    # lock window: an open call whose next game tips soon and hasn't been flagged yet
+    calls = open_calls(snap, cfg)
+    if sch.lock_window_due(snap.now, calls, set(state.get("lock_alerts", [])), sc["lock_window_min"]):
+        return "postgame", [], "lock-window"
+    r = snap.roster(rid)
     active = [p for p in r["players"] if p not in (r.get("reserve") or [])]
     teams = {snap.players.get(p, {}).get("team") for p in active} - {None}
     yday = (snap.now.date() - timedelta(days=1)).isoformat()
@@ -278,9 +302,9 @@ def decide_auto(snap, cfg, state):
         # batch: if another of my games should finish within ~25 min, wait for it
         soon = [g for g in running if 0 < (g.tip + timedelta(minutes=150) - snap.now).total_seconds() / 60 < 25]
         if soon:
-            return None, []
-        return "postgame", sorted(set(new_finals))
-    return None, []
+            return None, [], None
+        return "postgame", sorted(set(new_finals)), None
+    return None, [], None
 
 
 def ingest_locks(snap, cfg, a, persist=True):
@@ -369,14 +393,14 @@ def _main(argv=None):
     snap = load(cfg, now=now, offline=a.offline)
     timings["load_s"] = round(time.time() - t0, 1)
     ingest_locks(snap, cfg, a, persist=not a.dry_run)
-    mode, finals = a.mode, []
+    mode, finals, label = a.mode, [], None
     if mode == "auto":
-        mode, finals = decide_auto(snap, cfg, state)
+        mode, finals, label = decide_auto(snap, cfg, state)
         if not mode:
             print(f"[auto] nothing to send ({time.time() - t0:.1f}s)" if QUIET else f"[{now:%Y-%m-%d %H:%M} CT] auto: nothing to send")
             return 0          # no state write -> no commit from the workflow on idle runs
     ctx, me = analyse(snap, cfg, mode, timings, state)
-    if mode == "postgame" and not ctx["locks"] and not ctx["moves"]:
+    if mode == "postgame" and label != "lock-window" and not ctx["locks"] and not ctx["moves"]:
         print("[postgame] nothing to send (no open calls)")
         state.setdefault("finals_alerted", []).extend(finals)
         if not a.dry_run:
@@ -387,6 +411,8 @@ def _main(argv=None):
         timings["source_issues"] = len(snap.failures)
     ctx["assumptions"].append("Runtime: " + ", ".join(f"{k} {v}" for k, v in timings.items()))
     subj, txt, html = em.subject(ctx), em.text(ctx), em.html(ctx)
+    if label in ("late", "catch-up", "lock-window"):
+        subj = subj.replace("Sleeper |", f"Sleeper ({label}) |", 1)
     if a.test:
         subj = "[TEST] " + subj
     Path(cfg["cache_dir"], "last_email.html").write_text(html, encoding="utf-8")
@@ -411,6 +437,10 @@ def _main(argv=None):
     if mode == "pregame":
         state.setdefault("pregame_sent", []).append(now.date().isoformat())
     state.setdefault("finals_alerted", []).extend(finals)
+    from optimize import schedule as sch   # one reminder per tip cluster: mark calls this email covered
+    horizon = cfg["schedule"]["lock_batch_min"] + (cfg["schedule"]["pregame_lead_min"] if mode == "pregame" else 0)
+    state.setdefault("lock_alerts", []).extend(k for k in sch.keys_to_mark(now, open_calls(snap, cfg), horizon)
+                                               if k not in state["lock_alerts"])
     state["last_run"] = now.isoformat()
     state["last_sent"] = {"at": now.isoformat(), "mode": mode, "subject": subj}
     save_state(cfg, state)

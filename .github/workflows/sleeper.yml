@@ -2,7 +2,7 @@ name: sleeper-alerts
 
 on:
   schedule:
-    - cron: "*/30 * * * *"     # UTC; main.py decides (in America/Chicago, DST-aware) whether to send
+    - cron: "*/15 * * * *"     # UTC; main.py decides (in America/Chicago, DST-aware) whether to send
   workflow_dispatch:
     inputs:
       mode:
