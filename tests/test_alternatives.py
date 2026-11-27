@@ -51,8 +51,8 @@ def test_attach_runner_ups_and_best_alternative():
     M.attach_alternatives(ctx, considered, None)
     card = ctx["move_cards"][0]
     assert card["also"][0]["tie"] is True and card["also"][1]["drop"] == "Keldon Johnson"
-    assert card["also_text"] == ("Also considered: Derik Queen (bench) 59.2% (-0.2pp) (tie); "
-                                 "Charles Bassey (FA, drop Keldon Johnson) 56.5% (-2.9pp)")
+    assert card["also_text"].startswith("Also considered: Derik Queen (bench) 59.2% (-0.2 ± 0.0, tie)")
+    assert "Charles Bassey (FA, drop Keldon Johnson) 56.5% (-2.9 ± 0.0)" in card["also_text"]
     # no move recommended -> best alternative and why it lost
     considered[0]["moved"] = False
     considered[0]["best_alternative"] = considered[0]["runners_up"][0]

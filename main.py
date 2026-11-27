@@ -317,7 +317,15 @@ def attach_alternatives(ctx, considered, snap):
         if hit:
             card["also"] = [dict(name=r["name"], source=r["source"], drop=r["drop"], pwin=r["pwin"], delta=r["delta"], tie=r["tie"])
                             for r in hit["runners_up"]]
-            card["also_text"] = "Also considered: " + "; ".join(describe(r) for r in hit["runners_up"]) if hit["runners_up"] else ""
+            opts = hit.get("all_options") or hit["runners_up"]
+            def one(r):
+                if r.get("pwin") is None:
+                    return f"{r['name']}: {r['reason']}"
+                src = {"bench": "bench", "keep": "keep in slot"}.get(r["source"], f"FA, drop {r['drop']}")
+                return (f"{r['name']} ({src}) {r['pwin'] * 100:.1f}% ({r['delta'] * 100:+.1f} ± {(r.get('se') or 0) * 100:.1f}"
+                        f"{', tie' if r.get('tie') else ''}): {r.get('reason', '')}")
+            card["also_options"] = opts
+            card["also_text"] = ("Also considered: " + "; ".join(one(r) for r in opts)) if opts else ""
             extra = [x for x in (hit.get("tiebreak"), hit.get("sleeper_note")) if x]
             if extra:
                 card["also_text"] = (card["also_text"] + " " if card["also_text"] else "") + " ".join(extra)

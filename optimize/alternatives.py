@@ -45,9 +45,12 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
         inp2["pinned"] = {**inp_x["pinned"], (pid, day): slot}
         pl = build_plan(book, inp2, ch)
         tot = simulate_plan(pl, draws)
+        run.plans[(slot, pid)] = pl
         return p_win(tot, opp_totals), pl.ev, tot
 
+    run.plans = {}
     bench = [p for p in map(str, r["players"]) if p not in reserve and p not in starters and _tonight(snap, p, day)]
+    bench_idle = [p for p in map(str, r["players"]) if p not in reserve and p not in starters and not _tonight(snap, p, day)]
     droppable = [p for p in map(str, r["players"]) if p not in reserve and p not in starters]
     fas = []
     for p in free_agents(snap):
@@ -95,10 +98,49 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
         pick = next((c for c in cands if c["pid"] == pick_pid), None) if moved else keep
         if pick is None:
             pick = keep
-        runners = [c for c in cands if c["pid"] != pick.get("pid")][:3]
-        for c in runners:
+        from optimize.selfcheck import paired
+        pick_plan = run.plans.get((s.index, pick.get("pid"))) or me.plan
+        later_use = {}
+        for d_, a_ in pick_plan.day_assign.items():
+            for sl, p_ in a_.items():
+                if d_ > day:
+                    later_use.setdefault(p_, (d_, inp["slot_names"][sl]))
+        rest = [c for c in cands if c["pid"] != pick.get("pid")]
+        for c in rest:
             c["delta"] = c["pwin"] - pick["pwin"]
+            c["se"] = paired(c["tot"], pick["tot"], opp_totals)[1] if pick.get("tot") is not None else 0.0
             c["tie"] = abs(c["delta"]) * 100 < TIE_PP
+            m_ = game_model(book, c["pid"], _tonight(snap, c["pid"], day))[0]
+            if c["source"] == "FA":
+                c["reason"] = f"free agent: costs a roster spot (drop {c['drop']})"
+            elif m_.p_play < 0.9:
+                c["reason"] = f"{snap.players.get(c['pid'], {}).get('injury_status') or 'questionable'}, {m_.p_play * 100:.0f}% to play"
+            elif c["pid"] in later_use:
+                d_, sl = later_use[c["pid"]]
+                c["reason"] = f"more valuable as the {d_[5:]} fallback for {sl}"
+            elif c.get("e_pts", 0) < pick.get("e_pts", 0):
+                c["reason"] = f"lower E tonight ({c['e_pts']:.1f} vs {pick.get('e_pts', 0):.1f})"
+            else:
+                c["reason"] = "lower P(win) once the rest of the week is re-planned"
+        idle = [dict(pid=p, name=snap.pname(p), source="bench", drop=None, pwin=None, delta=None, se=None, tie=False,
+                     reason="no game tonight" + (f"; used {later_use[p][0][5:]} in {later_use[p][1]}" if p in later_use else ""))
+                for p in bench_idle if eligible(s.slot, inp["positions"].get(p) or snap.players.get(p, {}).get("fantasy_positions"))]
+        keep_opt = []
+        occ_state = next((x for x in inp["states"] if x.index == s.index), None)
+        if moved and occ_state is not None and occ_state.pid and occ_state.open_decision:
+            pl_k = build_plan(book, inp, {**choices, s.index: "hold"})
+            t_k = simulate_plan(pl_k, draws)
+            pk = p_win(t_k, opp_totals)
+            g_k = _tonight(snap, occ_state.pid, day)
+            m_k = game_model(book, occ_state.pid, g_k)[0] if g_k else None
+            why = (f"{snap.players.get(occ_state.pid, {}).get('injury_status') or 'healthy'}, {m_k.p_play * 100:.0f}% to play; "
+                   f"his own game tonight uses the slot") if m_k else "no game tonight; keeping him blocks the slot"
+            keep_opt = [dict(pid=occ_state.pid, name=snap.pname(occ_state.pid), source="keep", drop=None, pwin=pk,
+                             delta=pk - pick["pwin"], se=paired(t_k, pick["tot"], opp_totals)[1] if pick.get("tot") is not None else 0.0,
+                             tie=abs(pk - pick["pwin"]) * 100 < TIE_PP, reason=why)]
+        all_bench = keep_opt + [c for c in rest if c["source"] == "bench"] + idle
+        best_fa = [c for c in rest if c["source"] == "FA"][:2]
+        runners = rest[:3]
         tiebreak = None
         top = runners[0] if runners else None
         if moved and top and top["tie"] and top.get("e_pts", 0) > pick.get("e_pts", 0):
@@ -111,7 +153,7 @@ def evaluate(snap, cfg, book, me, opp_totals, draws, values_ros: dict, max_fa: i
             if ours != theirs:
                 sl_note = (f"Sleeper's projection disagrees: {top['name']} {top['sleeper_proj']:.1f} vs {pick['name']} {pick['sleeper_proj']:.1f} "
                            f"(ours {top.get('e_pts', 0):.1f} vs {pick.get('e_pts', 0):.1f}).")
-        out.append(dict(tiebreak=tiebreak, sleeper_note=sl_note, slot=s.slot, slot_index=s.index, occupant=snap.pname(s.pid) if s.pid else None,
+        out.append(dict(all_options=all_bench + best_fa, tiebreak=tiebreak, sleeper_note=sl_note, slot=s.slot, slot_index=s.index, occupant=snap.pname(s.pid) if s.pid else None,
                         occupant_plays_tonight=bool(occupant_plays), moved=moved, pick=pick, runners_up=runners,
                         best_alternative=None if moved else (runners[0] if runners else None)))
     return out
