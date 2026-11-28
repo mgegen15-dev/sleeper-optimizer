@@ -129,6 +129,8 @@ def text(ctx) -> str:
             L.append(f"  Playoff odds: {ctx['playoff'] * 100:.1f}%")
     if ctx.get("assumptions"):
         L += ["", "ASSUMPTIONS & DATA"] + [f"  - {a}" for a in ctx["assumptions"]]
+    if ctx.get("calibration"):
+        L += ["", ctx["calibration"]]
     L += ["", f"{FOOTER}  Locks read from {ctx.get('lock_source', 'inferred')} at {ctx.get('read_at', '?')} · {ctx.get('n_sims', 0):,} sims."]
     return "\n".join(L)
 
@@ -251,6 +253,7 @@ def html(ctx) -> str:
             f'<li class="m" style="font-size:11px;color:#6b7280;margin:0 0 3px">{escape(a)}</li>' for a in ctx["assumptions"]) + "</ul>")
     # 6) footer
     out.append(f'<tr><td class="m" style="font-size:12px;color:#6b7280;text-align:center;padding:14px 8px 18px">{escape(FOOTER)}<br>'
-               f'Locks read from {escape(ctx.get("lock_source", "inferred"))} at {escape(ctx.get("read_at", "?"))} · {ctx.get("n_sims", 0):,} sims</td></tr>')
+               f'Locks read from {escape(ctx.get("lock_source", "inferred"))} at {escape(ctx.get("read_at", "?"))} · {ctx.get("n_sims", 0):,} sims'
+               + (f'<br>{escape(ctx["calibration"])}' if ctx.get("calibration") else "") + '</td></tr>')
     out.append("</table></td></tr></table></body></html>")
     return "".join(out)

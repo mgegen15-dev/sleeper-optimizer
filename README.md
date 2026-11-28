@@ -101,6 +101,11 @@ Each applied change appears as one line under Assumptions in the email. The CI l
 
 **Disable it:** set `news_llm.enabled: false`.
 
+## Forward calibration test
+Every analysed run stores our P(win) and a Sleeper-style P(win), with a timestamp, in the Actions-cache state. Nothing goes in git and no names appear in the logs. The Sleeper-style number uses Sleeper's projections only, with everyone assumed to play.
+
+When a week ends, its result is read from Sleeper's official roster record (wins, losses, ties), not from the matchup feed. Every checkpoint from that week is then scored with the Brier score and log loss. Once 2 or more weeks are scored, the email footer shows a one-line running comparison.
+
 ## Reading lock state from Sleeper (optional, recommended)
 Sleeper's public API has no lock field. The website does have one, through its private GraphQL API:
 `POST https://sleeper.com/graphql`, query `get_matchup_legs`, which returns `matchup_legs(league_id, round) { roster_id starters starters_games … }`.

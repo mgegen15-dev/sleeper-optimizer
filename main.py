@@ -302,6 +302,14 @@ def analyse(snap, cfg, mode, timings, state=None):
                              margin_p90=float(np.percentile(margin, 90))),
                lineup=lineup, moves=moves, locks=locks, locked_list=locked_list, waivers=waivers, trades=trades, assumptions=assumptions,
                playoff=playoff)
+    # forward calibration test: log our P(win) and a Sleeper-style one (state only; scored at week end)
+    from optimize import calibration as cal
+    try:
+        if state is not None:
+            cal.log_run(snap, cfg, state, pw, cal.sleeper_style_pwin(snap, cfg))
+            ctx["calibration"] = cal.footer_line(state)
+    except Exception as e:
+        snap.failures.append(f"Calibration logging failed ({type(e).__name__})")
     snap._cfg = cfg
     ctx.update(build_view(snap, cfg, mode, me, book, locks, moves, tonight | used, lineup_date, plays_on, ctx))
     try:
